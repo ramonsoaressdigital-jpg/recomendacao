@@ -4,7 +4,7 @@ import { DataStore } from "./data-store.js";
 // --- DEBUG SWITCH ---
 const RECO_DEBUG = true;
 
-// Normaliza profundidade para um formato único: "00-20" etc.
+// ===== Utils de normalização/placeholder ===================================================
 function normDepth(s) {
   if (!s) return "";
   const m = String(s).match(/(\d+)\D+(\d+)/);
@@ -14,7 +14,6 @@ function normDepth(s) {
   return `${a}-${b}`;
 }
 
-// --- Placeholder → valores numéricos (vars e soil) + vírgula decimal -> ponto
 function compilePlaceholders(code, vars, soil) {
   let out = String(code);
 
@@ -30,35 +29,67 @@ function compilePlaceholders(code, vars, soil) {
     return Number.isFinite(+val) ? String(+val) : "0";
   });
 
-  // vírgula decimal apenas em padrões número,número -> número.número
+  // vírgula decimal número,número -> número.número
   out = out.replace(/(\d+),(\d+)/g, "$1.$2");
-
   return out;
 }
 
-// --- Executa SEMPRE como "corpo de função" (aceita if/else e returns)
-function safeEvalIfElseBlock(compiledBody) {
+// ===== Execução de fórmulas (bloco if/else OU expressão simples) ===========================
+function toTernaryFromIfElse(code) {
+  const src = String(code);
+  const blockRe = /(if|else\s+if|else)\s*(?:\(([^)]*)\))?\s*\{\s*return\s*([^;{}]+?)\s*;?\s*\}/gi;
+  const parts = [...src.matchAll(blockRe)];
+  if (!parts.length) return code;
+
+  let out = "";
+  for (let i = 0; i < parts.length; i++) {
+    const kind = (parts[i][1] || "").toLowerCase();
+    const cond = (parts[i][2] || "").trim();
+    const ret = (parts[i][3] || "0").trim();
+
+    if (kind === "if" || kind === "else if") {
+      out += `(${cond}) ? (${ret}) : `;
+      if (i === parts.length - 1) out += `0`;
+    } else {
+      out += `(${ret})`;
+    }
+  }
+  return out;
+}
+
+function compileExpression(expr, vars, soil) {
+  let out = String(expr)
+    .replace(/@([^@]+)@/g, (_, k) => vars[k.trim()] ?? 0)
+    .replace(/#([^#]+)#/g, (_, k) => soil[k.trim()] ?? 0)
+    .replace(/,/g, '.');
+
+  if (/\bif\b|\belse\s+if\b|\belse\b/i.test(out)) {
+    out = toTernaryFromIfElse(out);
+  }
+  return out;
+}
+
+function safeEval(expr) {
   try {
-    // compiledBody deve ser algo como:
-    // if (...) { return 120 } else if (...) { return 80 } else { return 0 }
-    const fn = new Function(`"use strict"; ${compiledBody}`);
+    const fn = new Function(`return (${expr});`);
     const res = fn();
     return Number.isFinite(res) ? res : 0;
-  } catch (e) {
-    // Se quiser silenciar completamente, comente a linha abaixo
-    // console.warn("[RECO] Erro ao avaliar bloco if/else:", e.message, "\n---\n", compiledBody, "\n---");
+  } catch {
     return 0;
   }
 }
 
-// --- Avalia necessidade (somente if/else; sem “expressão simples”)
-function evaluateNeed_IFELSE_ONLY(expression, vars, soil) {
-  const compiled = compilePlaceholders(expression, vars, soil);
-  return safeEvalIfElseBlock(compiled);
+// tenta FormulaEngine primeiro, depois fallback
+function evaluateNeed(expression, vars, soil) {
+  if (window.FormulaEngine?.evaluateSingle) {
+    const v = window.FormulaEngine.evaluateSingle(expression, vars, soil);
+    if (Number.isFinite(v)) return v;
+  }
+  const expr = compileExpression(expression, vars, soil);
+  return safeEval(expr);
 }
 
-
-// --- Utils de dataset ---
+// ===== Dataset helpers ====================================================================
 function findDepthIndex(headers) {
   return headers.findIndex(h => h.toLowerCase().includes("profundidade"));
 }
@@ -76,94 +107,15 @@ function rowToSoilDict(headers, row) {
   return o;
 }
 
-
-// --- Converte cadeia if/else-if/else → ternário (tolerante a ; e quebras de linha) ---
-function toTernaryFromIfElse(code) {
-  // Normaliza quebras exageradas de espaço (sem alterar operadores):
-  const src = String(code);
-
-  // Captura blocos: if (...) { return X } | else if (...) { return Y } | else { return Z }
-  const blockRe = /(if|else\s+if|else)\s*(?:\(([^)]*)\))?\s*\{\s*return\s*([^;{}]+?)\s*;?\s*\}/gi;
-  const parts = [...src.matchAll(blockRe)];
-  if (!parts.length) return code;
-
-  // Monta ternário aninhado
-  let out = "";
-  for (let i = 0; i < parts.length; i++) {
-    const kind = (parts[i][1] || "").toLowerCase();
-    const cond = (parts[i][2] || "").trim();
-    const ret = (parts[i][3] || "0").trim();
-
-    if (kind === "if" || kind === "else if") {
-      out += `(${cond}) ? (${ret}) : `;
-      if (i === parts.length - 1) out += `0`; // fallback se não houver else
-    } else {
-      // else final
-      out += `(${ret})`;
-    }
-  }
-  return out;
-}
-
-// --- Substitui @var@ e #col# e converte vírgula decimal; garante conversão de if/else ---
-function compileExpression(expr, vars, soil) {
-  let out = String(expr)
-    .replace(/@([^@]+)@/g, (_, k) => vars[k.trim()] ?? 0)
-    .replace(/#([^#]+)#/g, (_, k) => soil[k.trim()] ?? 0)
-    .replace(/,/g, '.'); // vírgula → ponto
-
-  if (/\bif\b|\belse\s+if\b|\belse\b/i.test(out)) {
-    out = toTernaryFromIfElse(out);
-  }
-  return out;
-}
-
-function safeEval(expr) {
-  try {
-    const fn = new Function(`return (${expr});`);
-    const res = fn();
-    return Number.isFinite(res) ? res : 0;
-  } catch (e) {
-    console.warn("[RECO] Erro ao avaliar expressão:", expr, e.message);
-    return 0;
-  }
-}
-
-// --- SEMPRE compila localmente; se o FormulaEngine existir e funcionar, a gente usa ele primeiro ---
-function evaluateNeed(expression, vars, soil) {
-  // 1) tenta com FormulaEngine (se estiver disponível e conseguir avaliar)
-  if (window.FormulaEngine?.evaluateSingle) {
-    const v = window.FormulaEngine.evaluateSingle(expression, vars, soil);
-    if (Number.isFinite(v)) return v;
-  }
-  // 2) fallback garantido: compila + ternário + eval local
-  const expr = compileExpression(expression, vars, soil);
-  return safeEval(expr);
-}
-
-
-
-// --- Arredondamento da dose ---
-function applyRounding(val, arredonda) {
-  if (!arredonda || arredonda === "none") return val;
-  const step = parseFloat(arredonda);
-  if (!Number.isFinite(step) || step <= 0) return val;
-  return Math.round(val / step) * step;
-}
-
-// --- Normalização de uma fórmula vinda do DataStore (compatível com formatos antigos/novos) ---
+// ===== Normalização de fórmulas ============================================================
 function normalizeFormula(f) {
-  // Campos suportados:
-  // - f.expression  | f.formula          → expressão
-  // - f.productId   | f.produtoId        → id do produto
-  // - f.productName | f.produtoNome      → nome do produto (fallback)
-  // - f.targetPropKey | f.atributo       → chave do atributo no produto (ex: "p2o5", "s", "cao", "prnt")
-  // - f.depths (array) | f.profundidades (string "00-20,20-40")
-  // - f.priority, f.enabled, f.name
   const expression = f.expression ?? f.formula ?? "";
   const targetPropKey = (f.targetPropKey ?? f.atributo ?? "").toString().trim().toLowerCase();
 
-  // normaliza profundidades
+  const productIds = Array.isArray(f.productIds)
+    ? f.productIds
+    : (f.productId ? [f.productId] : []);
+
   let depths = Array.isArray(f.depths) ? f.depths : undefined;
   if (!depths && typeof f.profundidades === "string") {
     depths = f.profundidades.split(",").map(s => s.trim()).filter(Boolean);
@@ -173,7 +125,7 @@ function normalizeFormula(f) {
     id: f.id,
     name: f.name ?? f.nome ?? f.atributo ?? "(sem nome)",
     expression,
-    productId: f.productId ?? f.produtoId,
+    productIds,
     productName: f.productName ?? f.produtoNome,
     targetPropKey,
     depths,
@@ -183,306 +135,97 @@ function normalizeFormula(f) {
   };
 }
 
+// ===== Políticas de arredondamento e dose ==================================================
+function roundStep(x, step, mode = "nearest") {
+  const n = Number(x), s = Number(step);
+  if (!Number.isFinite(n) || !Number.isFinite(s) || s <= 0) return n;
+  if (mode === "up") return Math.ceil(n / s) * s;
+  if (mode === "down") return Math.floor(n / s) * s;
+  return Math.round(n / s) * s;
+}
 
+function applyDoseRules(doseRaw, regras) {
+  let d = Math.max(0, Number(doseRaw) || 0);
 
+  if (regras?.arredonda) {
+    d = roundStep(d, regras.arredonda, regras?.arredondaModo || "nearest");
+  }
 
-// export function executarRecomendacao(dataset) {
-//   if (!dataset?.headers?.length || !dataset?.rows?.length) {
-//     throw new Error("Dataset inválido/ausente");
-//   }
+  const min = Number(regras?.doseMin) || 0;
+  const max = Number(regras?.doseMax) || Infinity;
+  const permiteZero = regras?.permiteZero === true;
 
-//   const formulas = (DataStore.formulas ?? [])
-//     .map(normalizeFormula)
-//     .filter(f => f.enabled && f.expression);
+  if (d === 0) {
+    d = permiteZero ? 0 : (min > 0 ? min : 0);
+  } else {
+    if (min > 0 && d < min) d = min;
+  }
 
-//   formulas.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+  if (Number.isFinite(max)) d = Math.min(d, max);
 
-//   const produtos = window.ProductStore?.load?.() ?? [];
-//   const vars = DataStore.variaveis ?? {};
+  if (regras?.arredonda) {
+    d = roundStep(d, regras.arredonda, regras?.arredondaModo || "nearest");
+  }
 
-//   // Mapa rápido de produtos p/ conferência
-//   const produtosById = Object.fromEntries(produtos.map(p => [p.id, p]));
-//   const produtosByName = Object.fromEntries(produtos.map(p => [String(p.nome || "").trim().toLowerCase(), p]));
+  return d;
+}
 
-//   // DEBUG: inventário inicial
-//   if (RECO_DEBUG) {
-//     console.group("[RECO] Inventário inicial");
-//     console.log("headers:", dataset.headers);
-//     console.log("rows:", dataset.rows.length);
-//     console.log("produtos:", produtos.map(p => ({ id: p.id, nome: p.nome, props: p.props, regras: p.regras })));
-//     console.log("formulas (normalizadas):", formulas);
-//     const depthsCSV = [...new Set(dataset.rows.map(r => r[findDepthIndex(dataset.headers)]))].map(normDepth);
-//     console.log("depths no CSV (normalizadas):", depthsCSV);
-//     console.groupEnd();
-//   }
+// ====== PRECEDÊNCIA DE ATRIBUTOS (espelha a trait) =========================================
+// Execute primeiro quem costuma “dirigir” formulações e que tem produtos multinutrientes.
+const ATTRIBUTE_PRECEDENCE = [
+  "p2o5", "p2o5_fosfatagem",
+  "n", "n_fosfatagem",
+  "k2o", "k2o_fosfatagem",
+  "s", "cao", "mgo", "prnt",
+  "b", "fe", "cu", "mn", "zn"
+];
 
-//   const depthIdx = findDepthIndex(dataset.headers);
-//   const pointIdx = findPointIndex(dataset.headers);
+function attributeOrder(a, b) {
+  const ia = ATTRIBUTE_PRECEDENCE.indexOf(String(a).toLowerCase());
+  const ib = ATTRIBUTE_PRECEDENCE.indexOf(String(b).toLowerCase());
+  const sa = ia < 0 ? 999 : ia;
+  const sb = ib < 0 ? 999 : ib;
+  return sa - sb;
+}
 
-//   const out = {};
-//   const delivered = {};
-
-//   dataset.rows.forEach((row, i) => {
-//     const soil = rowToSoilDict(dataset.headers, row);
-//     const ponto = pointIdx >= 0 ? (row[pointIdx] || `#${i + 1}`) : `#${i + 1}`;
-//     const depthValueRaw = depthIdx >= 0 ? String(row[depthIdx] || "").trim() : "";
-//     const depthValue = normDepth(depthValueRaw);
-
-//     out[ponto] = out[ponto] || [];
-//     delivered[ponto] = delivered[ponto] || {};
-
-//     for (const f of formulas) {
-//       // Profundidade
-//       if (f.depths?.length) {
-//         const targets = f.depths.map(normDepth);
-//         if (depthValue && !targets.includes(depthValue)) {
-//           if (RECO_DEBUG) console.debug(`[SKIP depth] ponto=${ponto} depthCSV=${depthValue} depthFormula=${targets} formula=${f.name}`);
-//           continue;
-//         }
-//       }
-
-//       // Produto
-//       let prod = null;
-//       if (f.productId && produtosById[f.productId]) {
-//         prod = produtosById[f.productId];
-//       } else if (f.productName && produtosByName[f.productName.trim().toLowerCase()]) {
-//         prod = produtosByName[f.productName.trim().toLowerCase()];
-//       }
-//       if (!prod) {
-//         if (RECO_DEBUG) console.debug(`[SKIP produto] ponto=${ponto} formula=${f.name} productId=${f.productId} productName=${f.productName}`);
-//         continue;
-//       }
-
-//       // Atributo / garantia
-//       const propKey = f.targetPropKey;
-//       if (!propKey) {
-//         if (RECO_DEBUG) console.debug(`[SKIP atributo] ponto=${ponto} formula=${f.name} motivo=targetPropKey vazio`);
-//         continue;
-//       }
-//       const garantia = parseFloat(prod.props?.[propKey] ?? "0");
-//       if (!Number.isFinite(garantia) || garantia <= 0) {
-//         if (RECO_DEBUG) console.debug(`[SKIP garantia] ponto=${ponto} formula=${f.name} produto=${prod.nome} propKey=${propKey} garantia=${garantia}`);
-//         continue;
-//       }
-
-//       // Necessidade
-//       const necessidade = evaluateNeed(f.expression, vars, soil);
-//       if (!(necessidade > 0)) {
-//         if (RECO_DEBUG) console.debug(`[SKIP necessidade<=0] ponto=${ponto} formula=${f.name} necessidade=${necessidade}`);
-//         continue;
-//       }
-
-//       // Entregas prévias do mesmo elemento
-//       const ja = delivered[ponto][propKey] ?? 0;
-//       const restante = Math.max(0, necessidade - ja);
-//       if (!(restante > 0)) {
-//         if (RECO_DEBUG) console.debug(`[SKIP suprido] ponto=${ponto} formula=${f.name} necessidade=${necessidade} entreguePrevio=${ja}`);
-//         continue;
-//       }
-
-//       //dose
-//       // === NOVO: arredondar o ENTREGUE (elemento), não a dose ===
-//       const regras = prod.regras ?? {};
-
-//       // 1) entregue bruto é o "restante" do elemento
-//       let entregue = restante;
-
-//       // 2) arredonda o ENTREGUE (nearest N)
-//       entregue = applyRounding(entregue, regras.arredonda ?? 0, "nearest", true);
-
-//       // (opcional) se você quiser permitir zerar quando muito pequeno:
-//       if (regras.permiteZero === false && entregue <= 0) {
-//         // Se não permite zero e arredondou pra 0, pula
-//         continue;
-//       }
-
-//       // 3) dose passa a ser consequência (apenas informativa)
-//       let dose = garantia > 0 ? (entregue / (garantia / 100)) : 0;
-
-//       // (opcional) se ainda quiser limites na DOSE (apenas cosmético)
-//       // if (regras.doseMin) dose = Math.max(dose, Number(regras.doseMin));
-//       // if (regras.doseMax && dose > 0) dose = Math.min(dose, Number(regras.doseMax));
-
-//       // atualiza o acumulado por elemento
-//       delivered[ponto][propKey] = (delivered[ponto][propKey] ?? 0) + entregue;
-
-//       out[ponto].push({
-//         produto: prod.nome,
-//         necessidade,
-//         entregue,
-//         unidade: prod.unidade || "kg/ha",
-//       });
-
-//       if (RECO_DEBUG) {
-//         console.debug(`[OK] ponto=${ponto} prod=${prod.nome} attr=${propKey} nec=${necessidade} gar%=${garantia} dose=${dose} ent=${entregue} depth=${depthValue}`);
-//       }
-//     }
-//   });
-
-//   return out;
-// }
-
-// export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
-//   if (!dataset?.headers?.length || !dataset?.rows?.length) {
-//     throw new Error("Dataset inválido/ausente");
-//   }
-
-//   const formulas = (DataStore.formulas ?? [])
-//     .map(normalizeFormula)
-//     .filter(f => f.enabled && f.expression)
-//     .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
-
-//   const produtos = window.ProductStore?.load?.() ?? [];
-//   const vars = DataStore.variaveis ?? {};
-
-//   const produtosById = Object.fromEntries(produtos.map(p => [p.id, p]));
-//   const produtosByName = Object.fromEntries(produtos.map(p => [String(p.nome || "").trim().toLowerCase(), p]));
-
-//   const depthIdx = findDepthIndex(dataset.headers);
-//   const pointIdx = findPointIndex(dataset.headers);
-
-//   const out = {};
-//   const delivered = {};
-
-//   dataset.rows.forEach((row, i) => {
-//     const soil = rowToSoilDict(dataset.headers, row);
-//     const ponto = pointIdx >= 0 ? (row[pointIdx] || `#${i + 1}`) : `#${i + 1}`;
-//     const depthValueRaw = depthIdx >= 0 ? String(row[depthIdx] || "").trim() : "";
-//     const depthValue = normDepth(depthValueRaw);
-
-//     out[ponto] = out[ponto] || [];
-//     delivered[ponto] = delivered[ponto] || {};
-
-//     for (const f of formulas) {
-//       // filtro por profundidade
-//       if (f.depths?.length) {
-//         const targets = f.depths.map(normDepth);
-//         if (depthValue && !targets.includes(depthValue)) continue;
-//       }
-
-//       // produto
-//       let prod = null;
-//       if (f.productId && produtosById[f.productId]) prod = produtosById[f.productId];
-//       else if (f.productName && produtosByName[f.productName.trim().toLowerCase()]) prod = produtosByName[f.productName.trim().toLowerCase()];
-//       if (!prod) continue;
-
-//       // atributo/garantia
-//       const propKey = f.targetPropKey;
-//       if (!propKey) continue;
-//       const garantia = parseFloat(prod.props?.[propKey] ?? "0");
-//       if (!Number.isFinite(garantia) || garantia <= 0) continue;
-
-//       // necessidade
-//       const necessidade = evaluateNeed(f.expression, vars, soil);
-
-//       // ✅ SE QUISER EXIBIR ZEROS: se necessidade === 0, ainda assim adiciona linha
-//       if (opts?.includeZeros && necessidade === 0) {
-//         out[ponto].push({
-//           produto: prod.nome,
-//           atributo: propKey,
-//           garantia_percent: garantia,
-//           necessidade: 0,
-//           entregue: 0,
-//           dose: 0,
-//           unidade: prod.unidade || "kg/ha",
-//           formula: f.name,
-//           _status: "zero"
-//         });
-//         continue;
-//       }
-
-//       // se necessidade <= 0 e não queremos zeros → pula
-//       if (!(necessidade > 0)) continue;
-
-//       // saldo após entregas anteriores
-//       const ja = delivered[ponto][propKey] ?? 0;
-//       const restante = Math.max(0, necessidade - ja);
-
-//       // ✅ “suprido” (restante === 0) também aparece como 0
-//       if (opts?.includeZeros && !(restante > 0)) {
-//         out[ponto].push({
-//           produto: prod.nome,
-//           atributo: propKey,
-//           garantia_percent: garantia,
-//           necessidade,
-//           entregue: 0,
-//           dose: 0,
-//           unidade: prod.unidade || "kg/ha",
-//           formula: f.name,
-//           _status: "suprido"
-//         });
-//         continue;
-//       }
-//       if (!(restante > 0)) continue;
-
-//       //dose
-//       // === NOVO: arredondar o ENTREGUE (elemento), não a dose ===
-//       const regras = prod.regras ?? {};
-
-//       // 1) entregue bruto é o "restante" do elemento
-//       let entregue = restante;
-
-//       // 2) arredonda o ENTREGUE (nearest N)
-//       entregue = applyRounding(entregue, regras.arredonda ?? 0, "nearest", true);
-
-//       // (opcional) se você quiser permitir zerar quando muito pequeno:
-//       if (regras.permiteZero === false && entregue <= 0) {
-//         // Se não permite zero e arredondou pra 0, pula
-//         continue;
-//       }
-
-//       // 3) dose passa a ser consequência (apenas informativa)
-//       let dose = garantia > 0 ? (entregue / (garantia / 100)) : 0;
-
-//       // (opcional) se ainda quiser limites na DOSE (apenas cosmético)
-//       if (regras.doseMin) dose = Math.max(dose, Number(regras.doseMin));
-//       if (regras.doseMax && dose > 0) dose = Math.min(dose, Number(regras.doseMax));
-
-//       // atualiza o acumulado por elemento
-//       delivered[ponto][propKey] = (delivered[ponto][propKey] ?? 0) + entregue;
-
-//       // entregue
-//       const entregue = dose * (garantia / 100);
-//       delivered[ponto][propKey] = (delivered[ponto][propKey] ?? 0) + entregue;
-
-//       out[ponto].push({
-//         produto: prod.nome,
-//         atributo: propKey,
-//         garantia_percent: garantia,
-//         necessidade,
-//         entregue,
-//         dose,
-//         unidade: prod.unidade || "kg/ha",
-//         formula: f.name
-//       });
-//     }
-//   });
-
-//   return out;
-// }
-
-
+// ====== MOTOR PRINCIPAL ====================================================================
 export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
   if (!dataset?.headers?.length || !dataset?.rows?.length) {
     throw new Error("Dataset inválido/ausente");
   }
 
-  const formulas = (DataStore.formulas ?? [])
+  // 1) Normaliza + filtra + ordena por prioridade
+  const formulasAll = (DataStore.formulas ?? [])
     .map(normalizeFormula)
-    .filter(f => f.enabled && f.expression)
-    .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+    .filter(f => f.enabled && f.expression);
 
+  // 2) Agrupa por atributo e ordena cada grupo por prioridade
+  const byAttr = new Map();
+  for (const f of formulasAll) {
+    const key = (f.targetPropKey || "").toLowerCase();
+    if (!key) continue;
+    if (!byAttr.has(key)) byAttr.set(key, []);
+    byAttr.get(key).push(f);
+  }
+  for (const arr of byAttr.values()) {
+    arr.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+  }
+
+  // 3) Lista de atributos em ordem de precedência
+  const atributosOrdenados = Array.from(byAttr.keys()).sort(attributeOrder);
+
+  // 4) Prepara produtos e aux
   const produtos = window.ProductStore?.load?.() ?? [];
+  const produtosById = Object.fromEntries(produtos.map(p => [String(p.id), p]));
   const vars = DataStore.variaveis ?? {};
-
-  const produtosById   = Object.fromEntries(produtos.map(p => [p.id, p]));
-  const produtosByName = Object.fromEntries(produtos.map(p => [String(p.nome || "").trim().toLowerCase(), p]));
 
   const depthIdx = findDepthIndex(dataset.headers);
   const pointIdx = findPointIndex(dataset.headers);
 
+  // Saída + acumuladores
   const out = {};
-  const delivered = {};
+  // deliveredAll[ponto][atributo] = total ENTREGUE (em elemento) por qualquer produto
+  const deliveredAll = {};
 
   dataset.rows.forEach((row, i) => {
     const soil = rowToSoilDict(dataset.headers, row);
@@ -491,102 +234,141 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
     const depthValue = normDepth(depthValueRaw);
 
     out[ponto] = out[ponto] || [];
-    delivered[ponto] = delivered[ponto] || {};
+    deliveredAll[ponto] = deliveredAll[ponto] || {};
 
-    for (const f of formulas) {
-      // Filtra por profundidade, se a fórmula restringe
-      if (f.depths?.length) {
-        const targets = f.depths.map(normDepth);
-        if (depthValue && !targets.includes(depthValue)) continue;
+    // Para cada atributo (em ordem), executa suas fórmulas
+    for (const attrKey of atributosOrdenados) {
+      const formulas = byAttr.get(attrKey) || [];
+      if (!formulas.length) continue;
+
+      for (const f of formulas) {
+        // filtro por profundidade
+        if (f.depths?.length) {
+          const targets = f.depths.map(normDepth);
+          if (depthValue && !targets.includes(depthValue)) continue;
+        }
+
+        // 1) necessidade bruta do ELEMENTO (ex.: K2O)
+        const necessidadeBruta = evaluateNeed(f.expression, vars, soil);
+        if (!Number.isFinite(necessidadeBruta)) continue;
+
+        // 2) restante = necessidade - tudo que JÁ foi entregue desse atributo por outros produtos
+        const jaEntregue = deliveredAll[ponto][attrKey] ?? 0;
+        let restante = Math.max(0, necessidadeBruta - jaEntregue);
+
+        // Determina os produtos-alvo: explicitamente escolhidos OU todos que tenham esse atributo
+        const ids = (f.productIds && f.productIds.length)
+          ? f.productIds
+          : produtos
+              .filter(p => p?.props && Number.isFinite(parseFloat(p.props[attrKey])))
+              .map(p => p.id);
+
+        // Se quer listar zeros e não há mais necessidade: registra zeros informativos (opcional)
+        if (opts?.includeZeros && !(restante > 0) && ids.length) {
+          for (const pid of ids) {
+            const prod0 = produtosById[String(pid)];
+            if (!prod0) continue;
+            const g0 = parseFloat(prod0.props?.[attrKey] ?? "0");
+            if (!(g0 > 0)) continue;
+            out[ponto].push({
+              produto: prod0.nome,
+              atributo: attrKey,
+              garantia_percent: g0,
+              necessidade: necessidadeBruta,
+              entregue: 0,
+              dose: 0,
+              unidade: prod0.unidade || "kg/ha",
+              formula: f.name,
+              _status: "suprido"
+            });
+          }
+          continue;
+        }
+
+        if (!(restante > 0) || !ids.length) continue;
+
+        // 3) DISTRIBUIÇÃO: produto a produto, **creditando TODOS os atributos do produto**
+        for (const pid of ids) {
+          if (!(restante > 0)) break;
+
+          const prod = produtosById[String(pid)];
+          if (!prod) continue;
+
+          const garantiaTarget = parseFloat(prod.props?.[attrKey] ?? "0");
+          if (!(garantiaTarget > 0)) continue;
+
+          const regras = prod.regras ?? {};
+
+          // Dose p/ cobrir o restante do atributo alvo:
+          const doseRaw = restante / (garantiaTarget / 100);
+          let dose = applyDoseRules(doseRaw, regras);
+
+          // Se dose foi zerada e não queremos zeros, pula
+          if (!opts?.includeZeros && dose === 0) continue;
+
+          // ENTREGUE em cada atributo (CREDITA TUDO do produto)
+          const entregasPorAtributo = {};
+          const props = prod.props || {};
+          for (const k of Object.keys(props)) {
+            const g = parseFloat(props[k]);
+            if (!(g > 0)) continue;
+            entregasPorAtributo[k.toLowerCase()] = dose * (g / 100);
+          }
+
+          // Atualiza acumulador global (todos atributos)
+          for (const k of Object.keys(entregasPorAtributo)) {
+            deliveredAll[ponto][k] = (deliveredAll[ponto][k] ?? 0) + entregasPorAtributo[k];
+          }
+
+          // Atualiza restante do atributo-alvo
+          const entregueTarget = entregasPorAtributo[attrKey] ?? 0;
+          restante = Math.max(0, restante - entregueTarget);
+
+          // Registra linha (focada no atributo-alvo para exibição)
+          out[ponto].push({
+            produto: prod.nome,
+            atributo: attrKey,
+            garantia_percent: garantiaTarget,
+            necessidade: necessidadeBruta,
+            entregue: entregueTarget,   // em ELEMENTO alvo
+            dose,                       // em PRODUTO (após regras)
+            unidade: prod.unidade || "kg/ha",
+            formula: f.name
+          });
+
+          if (RECO_DEBUG) {
+            console.debug(
+              `[OK] ponto=${ponto} attr=${attrKey} prod=${prod.nome} ` +
+              `nec=${necessidadeBruta.toFixed(2)} gar%=${garantiaTarget} ` +
+              `doseRaw=${doseRaw.toFixed(2)} dose=${dose.toFixed(2)} ` +
+              `entTarget=${entregueTarget.toFixed(2)} restante=${restante.toFixed(2)}`
+            );
+          }
+        }
       }
-
-      // Resolve produto
-      let prod = null;
-      if (f.productId && produtosById[f.productId]) prod = produtosById[f.productId];
-      else if (f.productName && produtosByName[f.productName.trim().toLowerCase()]) prod = produtosByName[f.productName.trim().toLowerCase()];
-      if (!prod) continue;
-
-      // Atributo/garantia
-      const propKey = f.targetPropKey;
-      if (!propKey) continue;
-      const garantia = parseFloat(prod.props?.[propKey] ?? "0");
-      if (!Number.isFinite(garantia) || garantia <= 0) continue;
-
-      // Necessidade (em “elemento” – ex.: CaO, K2O, etc.)
-      const necessidade = evaluateNeed(f.expression, vars, soil);
-
-      // Exibir zeros explícitos, se pedido
-      if (opts?.includeZeros && necessidade === 0) {
-        out[ponto].push({
-          produto: prod.nome,
-
-          necessidade: 0,
-          entregue: 0,
-
-          _status: "zero"
-        });
-        continue;
-      }
-
-      // Se não queremos zeros e/ou necessidade <= 0, pula
-      if (!(necessidade > 0)) continue;
-
-      // Restante a entregar considerando entregas anteriores desse elemento nesse ponto
-      const ja = delivered[ponto][propKey] ?? 0;
-      const restante = Math.max(0, necessidade - ja);
-
-      // Se já suprido, ainda assim podemos registrar linha 0 (se includeZeros=true)
-      if (opts?.includeZeros && !(restante > 0)) {
-        out[ponto].push({
-          produto: prod.nome,
-          atributo: propKey,
-          garantia_percent: garantia,
-          necessidade,
-          entregue: 0,
-          dose: 0,
-          unidade: prod.unidade || "kg/ha",
-          formula: f.name,
-          _status: "suprido"
-        });
-        continue;
-      }
-      if (!(restante > 0)) continue;
-
-      // === Regras de arredondamento no ENTREGUE (elemento) ===
-      const regras = prod.regras ?? {};
-
-      // 1) entregue bruto em elemento
-      let entregue = restante;
-
-      // 2) arredonda o ENTREGUE (nearest N) — step via regras.arredonda (ex.: 50)
-      //    applyRounding(val, step, mode = "nearest", allowZero = true)
-      entregue = applyRounding(entregue, regras.arredonda ?? 0, "nearest", true);
-
-      // opcional: respeitar “permiteZero”
-      if (regras.permiteZero === false && entregue <= 0) {
-        continue;
-      }
-
-      // 3) dose é apenas informativa (derivada do entregue)
-      //    dose (kg/ha do produto) = entregue (kg/ha do elemento) / (garantia%)
-      const dose = garantia > 0 ? (entregue / (garantia / 100)) : 0;
-
-      // NÃO aplique doseMin/doseMax se a dose é apenas informativa — para não distorcer “entregue”.
-      // (Se quiser mostrar dose arredondada por estética, faça um arredondamento *apenas de exibição* no render.)
-
-      // Atualiza acumulado entregue por elemento
-      delivered[ponto][propKey] = (delivered[ponto][propKey] ?? 0) + entregue;
-
-      // Registra a linha
-      out[ponto].push({
-        produto: prod.nome,
-        necessidade,
-        entregue,                 // <-- valor final arredondado em elemento
-        unidade: prod.unidade || "kg/ha",
-        formula: f.name
-      });
     }
   });
 
   return out;
+}
+export function aggregatePorProduto(resByPoint, { decimals = 0 } = {}) {
+  const totals = {};
+  for (const [ponto, linhas] of Object.entries(resByPoint || {})) {
+    for (const l of linhas || []) {
+      const key = `${ponto}__${l.produto}`;
+      if (!totals[key]) {
+        totals[key] = { ponto, produto: l.produto, dose_total: 0, unidade: l.unidade || "kg/ha" };
+      }
+      totals[key].dose_total += Number(l.dose) || 0;
+    }
+  }
+  // ordena por ponto (numérico se possível) e mantém a ordem de exibição amigável
+  const rows = Object.values(totals).map(r => ({
+    ponto: String(r.ponto),
+    produto: r.produto,
+    dose_total: +((+r.dose_total).toFixed(decimals)),
+    unidade: r.unidade
+  }));
+  rows.sort((a, b) => (parseFloat(a.ponto) || 0) - (parseFloat(b.ponto) || 0) || a.produto.localeCompare(b.produto));
+  return rows;
 }

@@ -86,3 +86,7 @@ else if (#ph_cacl2# < 5,5 && #p_res_mgdm-# >= 45) {
 else {
   return (0);
 }
+
+
+
+

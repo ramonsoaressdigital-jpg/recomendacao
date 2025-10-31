@@ -1,8 +1,7 @@
 // ui-formulas.js
 import { DataStore } from "./data-store.js";
 
-// Lista de props possíveis dadas pelo tipo do produto
-// (espelha o que você já usa no ProductStore; serve para preencher o select dinamicamente)
+// Templates de atributos por tipo (base)
 const PRODUCT_TEMPLATES = {
   "fertilizante": ["n", "p2o5", "k2o", "s", "b", "zn"],
   "fertilizante_fosfatagem": ["p2o5_total", "p2o5_sol", "cao"],
@@ -16,17 +15,13 @@ function detectDepthsFrom(dataset) {
   if (!dataset?.headers?.length) return [];
   const idx = dataset.headers.findIndex(h => h.toLowerCase().includes("profundidade"));
   if (idx < 0) return [];
-  const set = new Set(
-    dataset.rows.map(r => String(r[idx] ?? "").trim()).filter(Boolean)
-  );
+  const set = new Set(dataset.rows.map(r => String(r[idx] ?? "").trim()).filter(Boolean));
   return Array.from(set);
 }
 
 export function setupFormulasUI(containerId) {
   const root = document.getElementById(containerId);
   if (!root) return;
-
-  // 
 
   root.innerHTML = `
     <h2>3️⃣ Fórmulas</h2>
@@ -37,8 +32,8 @@ export function setupFormulasUI(containerId) {
           <input id="fxName" class="pill" placeholder="Ex.: Fosfatagem P2O5" />
         </div>
         <div>
-          <label>Produto alvo</label>
-          <select id="fxProduct" class="pill"></select>
+          <label>Produtos (1..N)</label>
+          <select id="fxProducts" class="pill" multiple size="4"></select>
         </div>
         <div>
           <label>Atributo do produto</label>
@@ -50,7 +45,6 @@ export function setupFormulasUI(containerId) {
         </div>
       </div>
 
-      <!-- 🔹 editor (esquerda) + elementos do laudo (direita) -->
       <div class="controls" style="grid-template-columns:2fr 1fr; gap:12px; align-items:start; margin-top:8px">
         <div>
           <label>Expressão</label>
@@ -82,7 +76,13 @@ export function setupFormulasUI(containerId) {
       <table>
         <thead>
           <tr>
-            <th>Ordem</th><th>Nome</th><th>Produto</th><th>Atributo</th><th>Profundidades</th><th>Ativa</th><th>Ações</th>
+            <th>Ordem</th>
+            <th>Nome</th>
+            <th>Produtos</th>
+            <th>Atributo</th>
+            <th>Profundidades</th>
+            <th>Ativa</th>
+            <th>Ações</th>
           </tr>
         </thead>
         <tbody id="fxList"></tbody>
@@ -90,9 +90,8 @@ export function setupFormulasUI(containerId) {
     </div>
   `;
 
-
   const elName = root.querySelector("#fxName");
-  const elProduct = root.querySelector("#fxProduct");
+  const elProducts = root.querySelector("#fxProducts");
   const elPropKey = root.querySelector("#fxPropKey");
   const elDepths = root.querySelector("#fxDepths");
   const elExpr = root.querySelector("#fxExpr");
@@ -102,65 +101,26 @@ export function setupFormulasUI(containerId) {
   const elSoilKeys = root.querySelector("#soilKeys");
   const elSoilSearch = root.querySelector("#soilSearch");
 
+  let editingId = null;
 
-  let editingId = null; // quando ≠ null, estamos editando essa fórmula
-
-  function startEdit(f) {
-    editingId = f.id;
-
-    // Nome
-    elName.value = f.name ?? "";
-
-    // Produto: selecionar e preparar atributos do tipo correto
-    const produtos = window.ProductStore?.load?.() ?? [];
-    const prod = produtos.find(p => p.id === f.productId);
-    elProduct.value = f.productId || "";
-    // popula atributos conforme tipo do produto selecionado
-    const tipo = (elProduct.selectedOptions[0]?.dataset?.type) || prod?.tipo || "outros";
-    const keys = (PRODUCT_TEMPLATES[tipo] ?? []);
-    elPropKey.innerHTML = `<option value="">—</option>` + keys.map(k => `<option value="${k}">${k}</option>`).join("");
-    elPropKey.value = f.targetPropKey || "";
-
-    // Profundidades
-    Array.from(elDepths.options).forEach(o => {
-      o.selected = (f.depths ?? []).includes(o.value);
-    });
-
-    // Expressão
-    elExpr.value = f.expression ?? "";
-
-    // Ajusta rótulo do botão
-    btnSave.textContent = "✅ Atualizar fórmula";
-
-    // Scroll suave até o editor (opcional)
-    elName.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  function cancelEdit() {
-    editingId = null;
-    btnClear.click();
-    btnSave.textContent = "💾 Salvar fórmula";
-  }
-
-  // insere texto no caret do textarea, preservando scroll/cursor
+  // --- Inserir no caret (corrigido: preserva scroll atual do textarea)
   function insertAtCursor(textarea, text) {
     textarea.focus();
     const start = textarea.selectionStart ?? textarea.value.length;
     const end = textarea.selectionEnd ?? textarea.value.length;
     const before = textarea.value.slice(0, start);
     const after = textarea.value.slice(end);
+    const prevScroll = textarea.scrollTop;
     textarea.value = before + text + after;
     const caret = start + text.length;
     textarea.selectionStart = textarea.selectionEnd = caret;
-    textarea.scrollTop = scrollTop; // 👈 mantém a posição
+    textarea.scrollTop = prevScroll;
     textarea.dispatchEvent(new Event("input"));
   }
 
-  // algumas colunas não fazem sentido na expressão
+  // Algumas colunas do laudo que não entram na expressão
   const IGNORE_HEADERS = new Set(["ponto", "amostra", "id_ponto", "id", "profundidade"]);
 
-
-  // renderiza as colunas do laudo como chips clicáveis
   function renderSoilKeys(filter = "") {
     const ds = DataStore.dataset;
     const headers = ds?.headers ?? [];
@@ -175,125 +135,171 @@ export function setupFormulasUI(containerId) {
       return;
     }
 
-    elSoilKeys.innerHTML = items
-      .map(h => `
-        <button class="pill" data-key="${h}"
-          style="text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-          ${h}
-        </button>
-      `).join("");
+    elSoilKeys.innerHTML = items.map(h => `
+      <button class="pill" data-key="${h}"
+        style="text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        ${h}
+      </button>
+    `).join("");
 
-    // click → insere #coluna#
     elSoilKeys.querySelectorAll("button[data-key]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.key;
-        insertAtCursor(elExpr, `#${key}#`);
-      });
+      btn.addEventListener("click", () => insertAtCursor(elExpr, `#${btn.dataset.key}#`));
     });
   }
 
-  // busca incremental
-  elSoilSearch?.addEventListener("input", (e) => {
-    renderSoilKeys(e.target.value || "");
-  });
+  elSoilSearch?.addEventListener("input", (e) => renderSoilKeys(e.target.value || ""));
 
-
-  // Preenche produtos
+  // --- Carrega produtos e preenche multi-select
   const produtos = window.ProductStore?.load?.() ?? [];
-  elProduct.innerHTML = `<option value="">— Selecione —</option>` + produtos.map(p =>
+  elProducts.innerHTML = produtos.map(p =>
     `<option value="${p.id}" data-type="${p.tipo}">${p.nome}</option>`
   ).join("");
 
-
-  function refreshDepths() {
-    const ds = DataStore.dataset;             // ✅ fonte única da verdade
-    const depths = detectDepthsFrom(ds);
-    if (!depths.length) {
-      elDepths.innerHTML = `<option value="">(nenhuma detectada — importe um laudo)</option>`;
-      return;
-    }
-    elDepths.innerHTML = depths.map(d => `<option value="${d}">${d}</option>`).join("");
+  // --- Monta conjunto de atributos possíveis (união dos templates + props reais)
+  const attrSet = new Set();
+  // templates
+  Object.values(PRODUCT_TEMPLATES).forEach(arr => arr.forEach(k => attrSet.add(k)));
+  // props reais dos produtos
+  for (const p of produtos) {
+    Object.keys(p.props ?? {}).forEach(k => attrSet.add(k));
   }
+  elPropKey.innerHTML = `<option value="">—</option>` +
+    Array.from(attrSet).sort().map(k => `<option value="${k}">${k}</option>`).join("");
 
+  // Ao escolher o atributo, habilita apenas produtos que têm esse atributo
+  elPropKey.addEventListener("change", () => {
+    const key = (elPropKey.value || "").toLowerCase();
+    Array.from(elProducts.options).forEach(opt => {
+      const prod = produtos.find(p => String(p.id) === String(opt.value));
+      const hasAttr = !!prod?.props?.[key];
+      opt.disabled = !hasAttr;
+      if (!hasAttr) opt.selected = false;
+    });
+  });
+
+  // Profundidades (vindas do dataset atual)
+  function refreshDepths() {
+    const ds = DataStore.dataset;
+    const depths = detectDepthsFrom(ds);
+    elDepths.innerHTML = depths.length
+      ? depths.map(d => `<option value="${d}">${d}</option>`).join("")
+      : `<option value="">(nenhuma detectada — importe um laudo)</option>`;
+  }
 
   renderSoilKeys("");
   refreshDepths();
 
-  // quando o laudo for importado / alterado
   window.addEventListener("dataset:changed", () => {
     elSoilSearch.value = "";
     renderSoilKeys("");
     refreshDepths();
   });
-  // Ao escolher produto, popular atributos do tipo correspondente
-  elProduct.addEventListener("change", () => {
-    const opt = elProduct.selectedOptions[0];
-    const tipo = opt?.dataset?.type || "outros";
-    const keys = PRODUCT_TEMPLATES[tipo] ?? [];
-    elPropKey.innerHTML = `<option value="">—</option>` + keys.map(k => `<option value="${k}">${k}</option>`).join("");
-  });
 
-  // Salvar
+  // --- Edição
+  function startEdit(f) {
+    editingId = f.id || null;
+
+    elName.value = f.name ?? "";
+
+    // atributo
+    elPropKey.value = f.targetPropKey || "";
+
+    // selecionar produtos
+    const ids = Array.isArray(f.productIds) ? f.productIds : (f.productId ? [f.productId] : []);
+    Array.from(elProducts.options).forEach(o => o.selected = ids.includes(o.value));
+
+    // Profundidades
+    Array.from(elDepths.options).forEach(o => {
+      o.selected = (f.depths ?? []).includes(o.value);
+    });
+
+    // Expressão
+    elExpr.value = f.expression ?? f.formula ?? "";
+
+    btnSave.textContent = "✅ Atualizar fórmula";
+    elName.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function cancelEdit() {
+    editingId = null;
+    btnClear.click();
+    btnSave.textContent = "💾 Salvar fórmula";
+  }
+
+  // --- Salvar / Atualizar
   btnSave.addEventListener("click", () => {
     const name = elName.value.trim();
-    const productId = elProduct.value;
+    const productIds = Array.from(elProducts.selectedOptions).map(o => o.value);
     const targetPropKey = elPropKey.value;
     const expression = elExpr.value.trim();
     const depths = Array.from(elDepths.selectedOptions).map(o => o.value).filter(Boolean);
+    
+    if (!name || !targetPropKey || !expression) {
+      alert("Preencha: Nome, Atributo e Expressão.");
+      return;
+    }
 
-    if (!name || !productId || !targetPropKey || !expression) {
-      alert("Preencha: Nome, Produto, Atributo e Expressão.");
+    if (!name || !targetPropKey || !expression) {
+      alert("Preencha: Nome, Atributo e Expressão.");
       return;
     }
 
     if (editingId) {
-      // atualizar
-      DataStore.updateFormula(editingId, { name, productId, targetPropKey, depths, expression });
-      cancelEdit();            // volta para modo criação
-      renderList();            // refaz a tabela
+      DataStore.updateFormula(editingId, { name, productIds, targetPropKey, depths, expression });
+      cancelEdit();
+      renderList();
       return;
     }
-
-    // criar
-    DataStore.addFormula({ name, productId, targetPropKey, depths, expression });
+    DataStore.addFormula({ name, productIds, targetPropKey, depths, expression });
     renderList();
     btnClear.click();
   });
 
   btnClear.addEventListener("click", () => {
     elName.value = "";
-    elProduct.value = "";
-    elPropKey.innerHTML = `<option value="">—</option>`;
+    elPropKey.value = "";
     elExpr.value = "";
+    Array.from(elProducts.options).forEach(o => o.selected = false);
     Array.from(elDepths.options).forEach(o => o.selected = false);
     editingId = null;
     btnSave.textContent = "💾 Salvar fórmula";
   });
 
+  // --- Tabela
   function renderList() {
     const formulas = DataStore.formulas.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+
     if (!formulas.length) {
       elList.innerHTML = `<tr><td colspan="7" style="color:var(--muted)">Nenhuma fórmula cadastrada.</td></tr>`;
       return;
     }
+
     elList.innerHTML = formulas.map(f => {
-      const prod = produtos.find(p => p.id === f.productId);
+      const ids = f.productIds ?? (f.productId ? [f.productId] : []);
+
+
+      const nomes = ids.length
+        ? ids.map(id => produtos.find(p => String(p.id) === String(id))?.nome || id).join(", ")
+        : `(todos com '${f.targetPropKey}')`;
+
       return `
         <tr>
           <td>${f.priority ?? 100}</td>
           <td>${f.name ?? "-"}</td>
-          <td>${prod?.nome ?? f.productId}</td>
-          <td>${f.targetPropKey}</td>
+          <td>${nomes || "—"}</td>
+          <td>${f.targetPropKey || "—"}</td>
           <td>${(f.depths ?? []).join(", ") || "—"}</td>
           <td>
-            <label class="small"><input type="checkbox" data-id="${f.id}" class="fxToggle" ${f.enabled !== false ? "checked" : ""}> ativa</label>
+            <label class="small">
+              <input type="checkbox" data-id="${f.id}" class="fxToggle" ${f.enabled !== false ? "checked" : ""}> ativa
+            </label>
           </td>
-            <td>
-              <button class="btn fxUp"   data-id="${f.id}">⬆️</button>
-              <button class="btn fxDown" data-id="${f.id}">⬇️</button>
-              <button class="btn fxEdit" data-id="${f.id}">✏️</button>
-              <button class="btn fxDel"  data-id="${f.id}">🗑️</button>
-            </td>
+          <td>
+            <button class="btn fxUp"   data-id="${f.id}">⬆️</button>
+            <button class="btn fxDown" data-id="${f.id}">⬇️</button>
+            <button class="btn fxEdit" data-id="${f.id}">✏️</button>
+            <button class="btn fxDel"  data-id="${f.id}">🗑️</button>
+          </td>
         </tr>
       `;
     }).join("");
@@ -320,7 +326,6 @@ export function setupFormulasUI(containerId) {
         renderList();
       });
     });
-
     elList.querySelectorAll(".fxEdit").forEach(btn => {
       btn.addEventListener("click", () => {
         const f = DataStore.formulas.find(x => x.id === btn.dataset.id);
