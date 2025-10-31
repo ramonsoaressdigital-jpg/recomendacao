@@ -1,128 +1,204 @@
-document.addEventListener("DOMContentLoaded", () => {
+// js/main.js (ESM)
+import { setupFormulasUI } from "./ui-formulas.js";
+import { executarRecomendacao } from "./recommendation-engine.js";
+import { DataStore } from "./data-store.js";
+
+window.addEventListener("DOMContentLoaded", () => {
   console.log("🚀 MVP iniciado");
 
-  // ======== PRODUTOS ========
-  const produtos = ProductStore.load();
-  const prodSection = document.getElementById("product-section");
-  const prodTableWrap = document.getElementById("prodTableWrap");
-  const formWrap = document.getElementById("productFormWrap");
-  ProductStore.renderForm(formWrap);
+  // ====== IMPORTAÇÃO CSV ======
+  const fileInput = document.getElementById("fileInput");
+  const btnImport = document.getElementById("btnImportCSV");
+  const tableWrap = document.getElementById("csvTableWrap");
+  const depthSelect = document.getElementById("depthSelect");
 
-  // Renderiza o formulário completo dentro da seção
-  // ProductStore.renderForm(prodSection);
+  btnImport.addEventListener("click", async () => {
+    if (!fileInput.files[0]) return alert("Selecione um arquivo CSV.");
+    const dataset = await CSVReader.readFile(fileInput.files[0]);
+    CSVReader.renderTable(dataset.headers, dataset.rows, tableWrap);
+    // window.dataset = dataset;
+    DataStore.setDataset(dataset);
 
-setTimeout(() => {
-  const tipoSelect = document.getElementById("prodTipo");
-  const btnSalvarProduto = document.getElementById("btnSalvarProduto");
-
-  // Renderiza os parâmetros técnicos iniciais (categoria padrão)
-  ProductStore.renderPropsGrid(tipoSelect.value || "fertilizante");
-
-  // Atualiza os campos técnicos ao trocar de categoria
-  tipoSelect.addEventListener("change", () => {
-    ProductStore.renderPropsGrid(tipoSelect.value);
+    // atualizar as profundidades do módulo de fórmulas (recarrega UI)
+    document.getElementById("formulas-panel").innerHTML = ""; // limpa
+    setupFormulasUI("formulas-panel");
   });
 
-  // Botão de salvar produto
+
+  // ====== PRODUTOS ======
+  const productFormWrap = document.getElementById("productFormWrap"); // <- é aqui que o form será injetado
+  const prodTableWrap = document.getElementById("prodTableWrap");
+  const produtos = window.ProductStore.load(); // IIFE exposto em window
+
+  // 1) Injeta o formulário dentro de #productFormWrap
+  window.ProductStore.renderForm(productFormWrap);
+
+  // 2) Agora que o formulário existe no DOM, pegamos seus elementos
+  const prodTipo = document.getElementById("prodTipo");
+  const btnSalvarProduto = document.getElementById("btnSalvarProduto");
+
+  // 3) Renderiza a grade de parâmetros técnicos baseada na categoria atual
+  window.ProductStore.renderPropsGrid(prodTipo.value || "fertilizante");
+
+  // 4) Troca de categoria -> refaz a grade de parâmetros
+  prodTipo.addEventListener("change", () => {
+    window.ProductStore.renderPropsGrid(prodTipo.value);
+  });
+
+  // 5) Salvar produto
   btnSalvarProduto.addEventListener("click", () => {
-    const p = ProductStore.collectProduct();
+    const p = window.ProductStore.collectProduct();
     if (!p.nome) return alert("Informe o nome do produto.");
     produtos.push(p);
-    ProductStore.save(produtos);
-    ProductStore.renderTable(produtos, prodTableWrap); // ✅ renderiza novamente após salvar
+    window.ProductStore.save(produtos);
+    window.ProductStore.renderTable(produtos, prodTableWrap);
     console.log("✅ Produto salvo:", p);
   });
 
-  // Renderiza tabela inicial logo que a página carrega
-  ProductStore.renderTable(produtos, prodTableWrap);
+  // 6) Renderizar a tabela inicial
+  window.ProductStore.renderTable(produtos, prodTableWrap);
 
-  // 🗑️ Remover produto (fica aqui, após a tabela inicial ser renderizada)
-  prodTableWrap.addEventListener("click", (e) => {
-    const btn = e.target.closest(".btn-del");
-    if (!btn) return;
-    const id = btn.dataset.id;
-    if (!confirm("Deseja realmente remover este produto?")) return;
-    ProductStore.removeProduct(id, prodTableWrap);
-    console.log("❌ Produto removido:", id);
+  // ====== UI DE FÓRMULAS (módulo novo) ======
+  setupFormulasUI("formulas-panel");
+
+  document.getElementById("clear-results").addEventListener("click", () => {
+    const container = document.getElementById("resultados");
+    container.innerHTML = `<p style="color:var(--muted)">Nenhuma recomendação executada ainda.</p>`;
   });
 
-}, 0);
+  const runBtn = document.getElementById("run-all");
+  const resultadosEl = document.getElementById("resultados");
 
+  // function renderResultados(resultados) {
+  //   resultadosEl.innerHTML = "";
+  //   const pontos = Object.keys(resultados);
+  //   if (!pontos.length) {
+  //     resultadosEl.innerHTML = `<p style="color:var(--muted)">Sem resultados (verifique fórmulas e produtos).</p>`;
+  //     return;
+  //   }
 
-  // ======== IMPORTAÇÃO CSV ========
-  const fileInput = document.getElementById('fileInput');
-  const btnImport = document.getElementById('btnImportCSV');
-  const tableWrap = document.getElementById('csvTableWrap');
-  const depthSelect = document.getElementById('depthSelect');
-  let dataset = null;
+  //   // Tabela única com cabeçalho único
+  //   const rows = [];
+  //   for (const ponto of pontos) {
+  //     const linhas = resultados[ponto] || [];
+  //     if (!linhas.length) continue;
+  //     // linha de separador por ponto
+  //     rows.push(
+  //       `<tr><td colspan="7" style="background:#0f1830;color:#9fb; font-weight:600">Ponto ${ponto}</td></tr>`
+  //     );
+  //     for (const r of linhas) {
+  //       rows.push(`<tr>
+  //       <td>${r.produto}</td>
+  //       <td>${(r.necessidade ?? 0).toFixed(2)}</td>
+  //       <td>${(r.entregue ?? 0).toFixed(2)}</td>
+  //     </tr>`);
+  //     }
+  //   }
 
-  btnImport.addEventListener('click', async () => {
-    if (!fileInput.files[0]) return alert('Selecione um arquivo CSV.');
-    dataset = await CSVReader.readFile(fileInput.files[0]);
-    CSVReader.renderTable(dataset.headers, dataset.rows, tableWrap);
-    window.dataset = dataset;
-    detectDepths(dataset);
-  });
+  //   resultadosEl.innerHTML = `
+  //   <table>
+  //     <thead>
+  //       <tr>
+  //         <th>Produto</th>
+  //         <th>Necessidade</th>
+  //         <th>Entregue</th>
+  //       </tr>
+  //     </thead>
+  //     <tbody>${rows.join("")}</tbody>
+  //   </table>`;
+  // }
+  function renderResultados(resultados) {
+    resultadosEl.innerHTML = "";
+    const pontos = Object.keys(resultados);
 
-  function detectDepths(ds) {
-    const depthColIndex = ds.headers.findIndex(h => h.toLowerCase().includes('profundidade'));
-    depthSelect.innerHTML = '<option value="">— Todas —</option>';
-    if (depthColIndex === -1) return (depthSelect.disabled = true);
-    const uniqueDepths = [...new Set(ds.rows.map(r => (r[depthColIndex] || '').trim()))].filter(Boolean);
-    uniqueDepths.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d;
-      opt.textContent = d;
-      depthSelect.appendChild(opt);
-    });
-    depthSelect.disabled = false;
-  }
-
-  // ======== FÓRMULAS TEMPORÁRIAS ========
-  const DataStore = { formulas: [] };
-  const form = document.getElementById("formFormulaTemp");
-  const lista = document.getElementById("listaFormulasTemp");
-
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const attr = document.getElementById("attrFormula").value.trim();
-    const nome = document.getElementById("nameFormula").value.trim();
-    const formula = document.getElementById("bodyFormula").value.trim();
-    if (!attr || !formula) return alert("Informe atributo e fórmula.");
-
-    DataStore.formulas.push({ atributo: attr, nome, formula });
-    renderListaFormulas();
-    form.reset();
-  });
-
-  function renderListaFormulas() {
-    if (!DataStore.formulas.length) {
-      lista.innerHTML = `<p style="color:var(--muted)">Nenhuma fórmula cadastrada.</p>`;
+    if (!pontos.length) {
+      resultadosEl.innerHTML = `<p style="color:var(--muted)">Sem resultados (verifique fórmulas e produtos).</p>`;
       return;
     }
 
-    lista.innerHTML = `
-      <table>
-        <thead><tr><th>Atributo</th><th>Nome</th><th>Fórmula</th></tr></thead>
-        <tbody>
-          ${DataStore.formulas.map(f => `
-            <tr>
-              <td>${f.atributo}</td>
-              <td>${f.nome || "-"}</td>
-              <td><code>${f.formula}</code></td>
-            </tr>`).join("")}
-        </tbody>
-      </table>`;
+    const rows = [];
+
+    for (const ponto of pontos) {
+      const linhas = resultados[ponto] || [];
+
+      // Cabeçalho por ponto
+      rows.push(
+        `<tr><td colspan="7" style="background:#0f1830;color:#9fb; font-weight:600">Ponto ${ponto}</td></tr>`
+      );
+
+      if (!linhas.length) {
+        // ✅ Ponto sem nenhum resultado → mostra “—”
+        rows.push(
+          `<tr>
+          <td colspan="7" style="color:#9fb; opacity:.85">—</td>
+        </tr>`
+        );
+        continue;
+      }
+
+      // Renderiza cada linha; zeros também aparecem
+      for (const r of linhas) {
+        rows.push(`<tr>
+        <td>${r.produto ?? "—"}</td>
+        <td>${Number.isFinite(r.necessidade) ? r.necessidade.toFixed(2) : "0.00"}</td>
+        <td>${Number.isFinite(r.entregue) ? r.entregue.toFixed(2) : "0.00"}</td>
+      </tr>`);
+      }
+    }
+
+    resultadosEl.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Produto</th>
+
+          <th>Necessidade</th>
+          <th>Entregue</th>
+    
+        </tr>
+      </thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>`;
   }
 
-  renderListaFormulas();
+  runBtn.addEventListener("click", () => {
+    console.log("[RUN] clicado");
+    try {
+      // Checks básicos pra evitar “nada acontece”
+      if (!DataStore.dataset) {
+        alert("Importe um laudo CSV primeiro.");
+        console.warn("[RUN] dataset ausente");
+        return;
+      }
+      const prods = window.ProductStore?.load?.() ?? [];
+      if (!prods.length) {
+        alert("Cadastre ao menos um produto.");
+        console.warn("[RUN] sem produtos");
+        return;
+      }
+      const formulas = DataStore.formulas ?? [];
+      if (!formulas.length) {
+        alert("Cadastre ao menos uma fórmula.");
+        console.warn("[RUN] sem fórmulas");
+        return;
+      }
 
-  // ======== EXECUTAR RECOMENDAÇÕES (placeholder) ========
-  document.getElementById("run-all").addEventListener("click", () => {
-    const produtos = ProductStore.load();
-    if (!window.dataset) return alert("Importe um laudo primeiro!");
-    if (!DataStore.formulas.length) return alert("Cadastre ao menos uma fórmula.");
-    if (!produtos.length) return alert("Cadastre ao menos um produto.");
-    alert(`Executaria recomendações com ${produtos.length} produtos e ${DataStore.formulas.length} fórmulas.`);
+      console.log("[RUN] Iniciando recomendação", {
+        headers: DataStore.dataset.headers,
+        rows: DataStore.dataset.rows?.length,
+        produtos: prods.length,
+        formulas: formulas.length,
+      });
+
+
+
+      const resultados = executarRecomendacao(DataStore.dataset || window.dataset, { includeZeros: true });
+      console.log("[RUN] Resultado bruto:", resultados);
+
+      renderResultados(resultados);
+    } catch (err) {
+      console.error("[RUN] Falha ao executar recomendação:", err);
+      alert("Falha ao executar recomendação. Veja o console para detalhes.");
+    }
   });
 });

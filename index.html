@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-br">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -23,52 +24,12 @@
     <h2>2️⃣ Produtos</h2>
     <!-- O formulário será injetado aqui -->
     <div id="productFormWrap"></div>
-    
+
     <!-- Tabela de produtos fica fora do container que o renderForm() sobrescreve -->
     <div id="prodTableWrap" class="tableWrap" style="margin-top:16px"></div>
   </section>
 
-  <!-- 3️⃣ Editor de Fórmulas -->
-  <section id="formula-section" class="card">
-    <h2>3️⃣ Editor de Fórmulas</h2>
-    <textarea id="formulaInput" class="pill" rows="6"
-      placeholder="Exemplo: return (#pH_00_20# * #Ca_00_20#) / @Adequado@;"></textarea>
-
-    <div class="controls" style="grid-template-columns:1fr 1fr">
-      <div>
-        <label>Variáveis (@nome@)</label>
-        <div id="varsList" class="controls"></div>
-        <button id="btnAddVar" class="btn">➕ Variável</button>
-      </div>
-      <div>
-        <label>Valores de Solo (#nome#)</label>
-        <div id="soilList" class="controls"></div>
-        <button id="btnAddSoil" class="btn">➕ Solo</button>
-      </div>
-    </div>
-
-    <div class="controls" style="grid-template-columns:1fr 1fr; gap:12px">
-      <div>
-        <label>Profundidade</label>
-        <select id="depthSelect" class="pill">
-          <option value="">— Todas —</option>
-        </select>
-      </div>
-    </div>
-  </section>
-
-  <!-- 4️⃣ Fórmulas cadastradas -->
-  <section id="formula-multiple" class="card">
-    <h2>📘 Fórmulas cadastradas para recomendação</h2>
-    <form id="formFormulaTemp" class="controls" style="grid-template-columns: 1fr 1fr 2fr auto; gap: 8px;">
-      <input id="attrFormula" class="pill" placeholder="Atributo (ex: P2O5_FOSFATAGEM)" required />
-      <input id="nameFormula" class="pill" placeholder="Nome descritivo (ex: Fosfatagem P2O5)" />
-      <textarea id="bodyFormula" class="pill" rows="2"
-        placeholder="if(#pH_CaCl2_00_20# < 5.5){return 120}" required></textarea>
-      <button id="btnAddFormulaTemp" class="btn">➕ Adicionar</button>
-    </form>
-    <div id="listaFormulasTemp" class="tableWrap"></div>
-  </section>
+  <section id="formulas-panel" class="card"></section>
 
   <!-- 5️⃣ Executar Recomendações -->
   <section id="recommendation-section" class="card">
@@ -82,9 +43,12 @@
     </div>
   </section>
 
-  <script src="js/csv-reader.js"></script>
-  <script src="js/product-crud.js"></script>   <!-- define window.ProductStore -->
-  <script src="js/formula-engine.js"></script>
-  <script type="module" src="js/main.js"></script> 
+<script src="js/formula-engine.js"></script>
+<script src="js/csv-reader.js"></script>
+<script src="js/product-crud.js"></script>
+<script type="module" src="js/data-store.js"></script>
+<script type="module" src="js/recommendation-engine.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
+
 </html>

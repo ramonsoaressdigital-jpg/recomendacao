@@ -1,60 +1,87 @@
+// window.FormulaEngine – suporta if/else com return OU expressão simples.
 window.FormulaEngine = (() => {
+  // Coerção segura p/ número
+  function toNum(v) {
+    if (v === null || v === undefined) return 0;
+    const s = String(v).replace(',', '.').trim();
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
 
-  function compile(formula, vars, soil) {
-    let expr = String(formula)
-      .replace(/@([^@]+)@/g, (_, k) => vars[k.trim()] ?? 0)
-      .replace(/#([^#]+)#/g, (_, k) => soil[k.trim()] ?? 0)
-      .replace(/,/g, '.');
+  // Compila placeholders para números (nunca string vazia)
+  function compilePlaceholders(src, vars, soil) {
+    let expr = String(src);
 
-    // Suporte a if ... return ... else ... → converte em ternário
-    const ifRe = /if\s*\(([^)]+)\)\s*\{\s*return\s*([^;{}]+)\s*\}\s*else\s*\{\s*return\s*([^;{}]+)\s*\}/i;
-    const m = expr.match(ifRe);
-    if (m) expr = `(${m[1]}) ? (${m[2]}) : (${m[3]})`;
+    // @variaveis@
+    expr = expr.replace(/@([^@]+)@/g, (_, k) => {
+      const key = k.trim();
+      return String(toNum(vars?.[key]));
+    });
 
-    // Suporte a if simples → ternário com 0
-    const ifSimple = /if\s*\(([^)]+)\)\s*\{\s*return\s*([^;{}]+)\s*\}/i;
-    const n = expr.match(ifSimple);
-    if (n) expr = `(${n[1]}) ? (${n[2]}) : 0`;
+    // #colunas#
+    expr = expr.replace(/#([^#]+)#/g, (_, k) => {
+      const key = k.trim();
+      return String(toNum(soil?.[key]));
+    });
+
+    // vírgula decimal genérica → ponto
+    expr = expr.replace(/(\d),(\d)/g, '$1.$2');
 
     return expr;
   }
 
-  function safeEval(expr) {
+  // Avalia EXPRESSION (ex.: "(a+b)/c")
+  function safeEvalExpr(expr) {
     try {
-      const fn = new Function(`return (${expr});`);
+      const fn = new Function(`"use strict"; return (${expr});`);
       const res = fn();
-      if (isNaN(res)) throw new Error('Resultado não numérico');
-      return res;
+      return Number.isFinite(res) ? res : 0;
     } catch (err) {
-      console.warn('Erro ao avaliar', expr, err);
-      return null;
+      console.warn('[FormulaEngine] Erro ao avaliar expressão:', expr, err);
+      return 0;
     }
   }
 
-  function evaluateSingle(formula, vars, soil) {
-    const expr = compile(formula, vars, soil);
-    return safeEval(expr);
+  // Avalia BLOCK (if/else com return dentro)
+  function safeEvalBlock(block) {
+    try {
+      // Envolve o bloco numa IIFE para permitir 'return' internamente
+      const fn = new Function(`"use strict"; return (function(){ ${block} })();`);
+      const res = fn();
+      return Number.isFinite(res) ? res : 0;
+    } catch (err) {
+      console.warn('[FormulaEngine] Erro ao avaliar bloco:', block, err);
+      return 0;
+    }
   }
 
+  // Decide o modo automaticamente
+  function evaluateSingle(formula, vars = {}, soil = {}) {
+    const compiled = compilePlaceholders(formula, vars, soil);
+
+    // Se o usuário usou if/else/return, tratamos como BLOCO
+    if (/\bif\b|\belse\b|\breturn\b/.test(compiled)) {
+      return safeEvalBlock(compiled);
+    }
+
+    // Caso contrário, como expressão simples
+    return safeEvalExpr(compiled);
+  }
+
+  // Avalia para todas as linhas do dataset (mantém seu comportamento)
   function evaluateAll(formula, vars, dataset) {
     if (!dataset?.headers || !dataset?.rows) return [];
-
-    // Detecta coluna "ponto" (case-insensitive)
-    const pontoColIndex = dataset.headers.findIndex(h =>
-      ["ponto", "amostra", "id_ponto", "id"].includes(h.toLowerCase())
+    const pontoIdx = dataset.headers.findIndex(h =>
+      ['ponto', 'amostra', 'id_ponto', 'id'].includes(String(h).toLowerCase())
     );
 
     return dataset.rows.map((row, i) => {
-      // monta dicionário { nome_coluna: valor }
       const soil = Object.fromEntries(
-        dataset.headers.map((h, j) => [h, parseFloat(row[j]) || 0])
+        dataset.headers.map((h, j) => [h, toNum(row[j])])
       );
-
-      // tenta obter nome real do ponto
-      const pontoLabel =
-        pontoColIndex >= 0 ? (row[pontoColIndex] || `#${i + 1}`) : `#${i + 1}`;
-
-      return { ponto: pontoLabel, valor: evaluateSingle(formula, vars, soil) };
+      const ponto =
+        pontoIdx >= 0 ? (row[pontoIdx] || `#${i + 1}`) : `#${i + 1}`;
+      return { ponto, valor: evaluateSingle(formula, vars, soil) };
     });
   }
 

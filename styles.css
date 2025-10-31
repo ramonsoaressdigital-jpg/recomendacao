@@ -64,3 +64,13 @@ th, td {
   border-bottom: 1px solid #223052;
   padding: 6px 8px;
 }
+#csvTableWrap{
+  max-height: 500px;
+
+}
+
+#resultados{
+
+    max-height: 500px;
+
+}
