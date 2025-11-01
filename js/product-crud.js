@@ -97,9 +97,15 @@ window.ProductStore = (() => {
             <option value="none">Não arredondar</option>
             <option value="5">Múltiplos de 5</option>
             <option value="10">Múltiplos de 10</option>
+            <option value="20">Múltiplos de 20</option>
             <option value="25">Múltiplos de 25</option>
             <option value="50">Múltiplos de 50</option>
             <option value="100">Múltiplos de 100</option>
+            <option value="100">Múltiplos de 250</option>
+            <option value="100">Múltiplos de 500</option>
+            <option value="100">Múltiplos de 1000</option>
+            <option value="100">Múltiplos de 2500</option>
+            <option value="100">Múltiplos de 5000</option>
           </select>
         </div>
       </div>
