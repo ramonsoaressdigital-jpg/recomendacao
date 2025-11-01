@@ -1,76 +1,188 @@
+/* ============================
+   Semear • Tema Escuro (apenas CSS)
+   ============================ */
+
+/* Paleta base (Semear como acento) */
 :root {
-  --bg: #0b1320;
-  --card: #111b2f;
-  --muted: #6b7a99;
-  --text: #e8eefc;
-  --border: #223052;
+  /* Verdes Semear */
+  --green-900: #0b6b3a;   /* acento principal */
+  --green-700: #157a41;
+  --green-500: #1f8f4e;
+  --green-300: #58b266;
+  --green-200: #8ad18f;
+
+  /* Escuros/Texto */
+  --bg:        #0b1320;   /* fundo da página */
+  --bg-grad:   #0b1320;   /* opcional para leve gradiente */
+  --card:      #0f1b2e;   /* fundo dos cards */
+  --card-2:    #0d1727;   /* variação sutil */
+  --border:    #1f2a45;   /* borda fria */
+  --text:      #e8eefc;   /* texto principal */
+  --text-weak: #c7d2f0;   /* texto secundário */
+  --muted:     #6b7a99;   /* subtítulos/observações */
+
+  /* Tabela */
+  --thead:     #13263f;
+  --row-hov:   #10223a;
+
+  /* Sombras com tom esverdeado sutil */
+  --shadow-1:  0 1px 1px rgba(0,0,0,0.25), 0 8px 24px rgba(21,122,65,0.12);
 }
+
+/* Base */
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: linear-gradient(180deg, var(--bg), var(--bg-grad));
   color: var(--text);
-  font: 14px/1.5 system-ui, sans-serif;
+  font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* Wrapper (se existir) */
 .wrap {
   max-width: 1100px;
   margin: 24px auto;
   padding: 0 16px;
 }
 
+/* Títulos */
+h1 { display: inline-flex; align-items: center; gap: 10px; color: var(--text); }
+h2 { color: var(--text); font-weight: 700; letter-spacing: .2px; margin: 0 0 12px 0; }
+
+/* Cards */
 .card {
   background: var(--card);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 16px;
   margin-top: 16px;
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
 }
 
+/* Botões */
 .btn {
-  background: #1a2a4a;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: white;
-  padding: 8px 12px;
+  appearance: none;
+  background: var(--green-500);
+  border: 1px solid var(--green-500);
+  border-radius: 10px;
+  color: #fff;
+  padding: 10px 14px;
   cursor: pointer;
+  font-weight: 600;
+  transition: background .18s ease, transform .06s ease, box-shadow .18s ease, border-color .18s ease;
+  box-shadow: 0 2px 10px rgba(31,143,78,0.18);
 }
+.btn:hover {
+  background: var(--green-700);
+  border-color: var(--green-700);
+  box-shadow: 0 4px 14px rgba(21,122,65,0.24);
+}
+.btn:active { transform: translateY(1px); }
 
+/* Pílulas/etiquetas */
 .pill {
-  background: #0f1830;
+  background: #10233b;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-weight: 600;
 }
 
+/* Área de controles */
 .controls {
   display: grid;
-  gap: 8px;
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
 }
 
+/* Inputs */
+input[type="file"],
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+input::placeholder, textarea::placeholder { color: var(--muted); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--green-300);
+  box-shadow: 0 0 0 3px rgba(31,143,78,0.16);
+}
+
+/* Tabelas */
 .tableWrap {
   margin-top: 12px;
   overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
 }
-
 table {
   width: 100%;
   border-collapse: collapse;
+  background: transparent;
+}
+thead th {
+  background: var(--thead);
+  color: var(--text);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  padding: 10px 12px;
+}
+tbody td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  color: var(--text-weak);
+}
+tbody tr:hover { background: var(--row-hov); }
+
+/* Densidade das áreas de resultado */
+#csvTableWrap, #resultados { max-height: 500px; }
+
+/* Links */
+a { color: var(--green-300); text-decoration: none; }
+a:hover { color: var(--green-200); text-decoration: underline; }
+
+/* Textos auxiliares */
+small, .help, .muted, .note { color: var(--muted); }
+
+/* Responsividade */
+@media (max-width: 720px) {
+  .controls { grid-template-columns: 1fr; }
 }
 
-th, td {
-  border-bottom: 1px solid #223052;
-  padding: 6px 8px;
+/* --------- Bloco injetado via JS --------- */
+#propsWrap {
+  background: var(--card) !important;
+  margin-top: 16px !important;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-1);
+  padding: 16px;
 }
-#csvTableWrap{
-  max-height: 500px;
-
+#propsWrap .small {
+  color: var(--muted) !important;
+  margin-bottom: 8px !important;
+}
+#propsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+  gap: 10px !important;
 }
 
-#resultados{
-
-    max-height: 500px;
-
-}
+h1 { display: inline-flex; align-items: center; gap: 10px; }
+.semear-logo { width: 100px; height: 100px; display: inline-block;    border-radius: 99px; }

@@ -4,7 +4,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MVP • Recomendação Agronômica</title>
+  <div class="header">
+
+    <title>MVP • Recomendação Agronômica</title>
+  </div>
+
   <link rel="stylesheet" href="styles.css" />
 </head>
 
@@ -44,11 +48,31 @@
     </div>
   </section>
 
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const h1 = document.querySelector('h1');
+      if (!h1) return;
+      const img = document.createElement('img');
+      img.src = './data/semear.png';
+      img.alt = 'Semear';
+      img.className = 'semear-logo';
+      h1.prepend(img);
+    });
+  </script>
+
+
 <script src="js/formula-engine.js"></script>
 <script src="js/csv-reader.js"></script>
 <script src="js/product-crud.js"></script>
-<script type="module" src="js/data-store.js"></script>
+
+<script type="module" src="js/seed-defaults.js"></script>
 <script type="module" src="js/recommendation-engine.js"></script>
+
+<!-- ⬇️ novo: auto-carrega o CSV padrão -->
+<script type="module" src="js/auto-load-csv.js"></script>
+
+<script type="module" src="js/data-store.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>
 

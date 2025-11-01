@@ -1,6 +1,22 @@
 // ui-formulas.js
 import { DataStore } from "./data-store.js";
 
+// --- MIGRA UMA VEZ application.equations -> formulas, se necessário ---
+(function migrateEquationsOnce() {
+  try {
+    const existing = JSON.parse(localStorage.getItem("formulas") || "[]");
+    if (Array.isArray(existing) && existing.length) return; // já tem
+
+    const app = JSON.parse(localStorage.getItem("application") || "null");
+    const eqs = app?.equations;
+    if (Array.isArray(eqs) && eqs.length) {
+      localStorage.setItem("formulas", JSON.stringify(eqs));
+      // avisa a UI (outras partes) que mudou
+      window.dispatchEvent(new CustomEvent("formulas:updated", { detail: eqs }));
+    }
+  } catch (e) { /* silencia */ }
+})();
+
 // Templates de atributos por tipo (base)
 const PRODUCT_TEMPLATES = {
   "fertilizante": ["n", "p2o5", "k2o", "s", "b", "zn"],
@@ -233,7 +249,7 @@ export function setupFormulasUI(containerId) {
     const targetPropKey = elPropKey.value;
     const expression = elExpr.value.trim();
     const depths = Array.from(elDepths.selectedOptions).map(o => o.value).filter(Boolean);
-    
+
     if (!name || !targetPropKey || !expression) {
       alert("Preencha: Nome, Atributo e Expressão.");
       return;
@@ -251,7 +267,14 @@ export function setupFormulasUI(containerId) {
       return;
     }
     DataStore.addFormula({ name, productIds, targetPropKey, depths, expression });
+    window.dispatchEvent(new CustomEvent("formulas:updated"));
+
     renderList();
+
+    window.addEventListener("formulas:updated", () => renderList());
+    window.addEventListener("storage", (e) => {
+      if (e.key === "formulas") renderList();
+    });
     btnClear.click();
   });
 
@@ -267,7 +290,9 @@ export function setupFormulasUI(containerId) {
 
   // --- Tabela
   function renderList() {
-    const formulas = DataStore.formulas.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+
+    const formulas = [...(DataStore.formulas || [])]
+  .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
 
     if (!formulas.length) {
       elList.innerHTML = `<tr><td colspan="7" style="color:var(--muted)">Nenhuma fórmula cadastrada.</td></tr>`;
@@ -308,12 +333,16 @@ export function setupFormulasUI(containerId) {
     elList.querySelectorAll(".fxDel").forEach(btn => {
       btn.addEventListener("click", () => {
         DataStore.removeFormula(btn.dataset.id);
+        window.dispatchEvent(new CustomEvent("formulas:updated"));
+
         renderList();
       });
     });
     elList.querySelectorAll(".fxToggle").forEach(chk => {
       chk.addEventListener("change", () => {
         DataStore.updateFormula(chk.dataset.id, { enabled: chk.checked });
+        window.dispatchEvent(new CustomEvent("formulas:updated"));
+
       });
     });
     elList.querySelectorAll(".fxUp,.fxDown").forEach(btn => {
@@ -323,6 +352,8 @@ export function setupFormulasUI(containerId) {
         const cur = f.priority ?? 100;
         const delta = btn.classList.contains("fxUp") ? -1 : 1;
         DataStore.updateFormula(f.id, { priority: Math.max(0, cur + delta) });
+        window.dispatchEvent(new CustomEvent("formulas:updated"));
+
         renderList();
       });
     });

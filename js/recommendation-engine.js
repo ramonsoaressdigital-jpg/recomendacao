@@ -14,6 +14,33 @@ function normDepth(s) {
   return `${a}-${b}`;
 }
 
+function buildPrimaryMap(produtos) {
+  // retorna Map<atributo(lowercase), Set<productIdString>>
+  const prim = new Map();
+  for (const p of (produtos || [])) {
+    const props = p?.props || {};
+    // pegue o(s) maior(es) valores de garantia do produto
+    let max = -Infinity;
+    for (const v of Object.values(props)) {
+      const n = parseFloat(v ?? "0");
+      if (Number.isFinite(n)) max = Math.max(max, n);
+    }
+    if (!(max > -Infinity)) continue;
+
+    // empate: todos com valor == max são primários
+    for (const [k, v] of Object.entries(props)) {
+      const n = parseFloat(v ?? "0");
+      if (n === max && n > 0) {
+        const attr = String(k).toLowerCase();
+        const set = prim.get(attr) ?? new Set();
+        set.add(String(p.id));
+        prim.set(attr, set);
+      }
+    }
+  }
+  return prim;
+}
+
 function compilePlaceholders(code, vars, soil) {
   let out = String(code);
 
@@ -216,6 +243,8 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
 
   // 4) Prepara produtos e aux
   const produtos = window.ProductStore?.load?.() ?? [];
+  const primMap = buildPrimaryMap(produtos);   // <-- NOVO
+
   const produtosById = Object.fromEntries(produtos.map(p => [String(p.id), p]));
   const vars = DataStore.variaveis ?? {};
 
@@ -226,6 +255,8 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
   const out = {};
   // deliveredAll[ponto][atributo] = total ENTREGUE (em elemento) por qualquer produto
   const deliveredAll = {};
+
+
 
   dataset.rows.forEach((row, i) => {
     const soil = rowToSoilDict(dataset.headers, row);
@@ -257,12 +288,18 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
         let restante = Math.max(0, necessidadeBruta - jaEntregue);
 
         // Determina os produtos-alvo: explicitamente escolhidos OU todos que tenham esse atributo
-        const ids = (f.productIds && f.productIds.length)
+        const idsBrutos = (f.productIds && f.productIds.length)
           ? f.productIds
           : produtos
-              .filter(p => p?.props && Number.isFinite(parseFloat(p.props[attrKey])))
-              .map(p => p.id);
+            .filter(p => p?.props && Number.isFinite(parseFloat(p.props[attrKey])))
+            .map(p => p.id);
 
+        // ✅ Filtro de FONTE PRIMÁRIA (empate permitido) — usa o primMap que você já construiu
+        const primSet = primMap.get(String(attrKey).toLowerCase()) ?? new Set();
+        let ids = idsBrutos.filter(pid => primSet.has(String(pid)));
+
+        // (opcional) fallback se não houver primário mapeado para esse atributo
+        if (!ids.length) ids = idsBrutos;
         // Se quer listar zeros e não há mais necessidade: registra zeros informativos (opcional)
         if (opts?.includeZeros && !(restante > 0) && ids.length) {
           for (const pid of ids) {
@@ -372,3 +409,4 @@ export function aggregatePorProduto(resByPoint, { decimals = 0 } = {}) {
   rows.sort((a, b) => (parseFloat(a.ponto) || 0) - (parseFloat(b.ponto) || 0) || a.produto.localeCompare(b.produto));
   return rows;
 }
+
