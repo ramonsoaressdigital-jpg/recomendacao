@@ -20,7 +20,7 @@ import { DataStore } from "./data-store.js";
 // Templates de atributos por tipo (base)
 const PRODUCT_TEMPLATES = {
   "fertilizante": ["n", "p2o5", "k2o", "s", "b", "zn"],
-  "fertilizante_fosfatagem": ["p2o5_total", "p2o5_sol", "cao"],
+  "fertilizante_fosfatagem": ["n_f", "p2o5_f", "k2o_f"],
   "corretivo": ["cao", "mgo", "pn", "prnt"],
   "condicionador": ["mo", "umidade"],
   "gesso": ["s", "caso4"],

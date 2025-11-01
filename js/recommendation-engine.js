@@ -199,22 +199,34 @@ function applyDoseRules(doseRaw, regras) {
 
 // ====== PRECEDÊNCIA DE ATRIBUTOS (espelha a trait) =========================================
 // Execute primeiro quem costuma “dirigir” formulações e que tem produtos multinutrientes.
-const ATTRIBUTE_PRECEDENCE = [
-  "p2o5", "p2o5_fosfatagem",
-  "n", "n_fosfatagem",
-  "k2o", "k2o_fosfatagem",
-  "s", "cao", "mgo", "prnt",
-  "b", "fe", "cu", "mn", "zn"
-];
-
+// const ATTRIBUTE_PRECEDENCE = [
+//   "p2o5", "p2o5_fosfatagem",
+//   "n", "n_fosfatagem",
+//   "k2o", "k2o_fosfatagem",
+//   "s", "cao", "mgo", "prnt",
+//   "b", "fe", "cu", "mn", "zn"
+// ];
+const TRAIT_PRIORITIES = {
+  cao:1, mgo:2,
+  p2o5:3, p2o5_fosfatagem:3,
+  n:5,    n_fosfatagem:5,
+  k2o:6,  k2o_fosfatagem:6,
+  s:7,
+  b:8, cu:9, mn:10, fe:11, zn:12,
+  prnt:99
+};
+// function attributeOrder(a, b) {
+//   const ia = ATTRIBUTE_PRECEDENCE.indexOf(String(a).toLowerCase());
+//   const ib = ATTRIBUTE_PRECEDENCE.indexOf(String(b).toLowerCase());
+//   const sa = ia < 0 ? 999 : ia;
+//   const sb = ib < 0 ? 999 : ib;
+//   return sa - sb;
+// }
 function attributeOrder(a, b) {
-  const ia = ATTRIBUTE_PRECEDENCE.indexOf(String(a).toLowerCase());
-  const ib = ATTRIBUTE_PRECEDENCE.indexOf(String(b).toLowerCase());
-  const sa = ia < 0 ? 999 : ia;
-  const sb = ib < 0 ? 999 : ib;
-  return sa - sb;
+  const pa = TRAIT_PRIORITIES[String(a).toLowerCase()] ?? 999;
+  const pb = TRAIT_PRIORITIES[String(b).toLowerCase()] ?? 999;
+  return pa - pb;
 }
-
 // ====== MOTOR PRINCIPAL ====================================================================
 export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
   if (!dataset?.headers?.length || !dataset?.rows?.length) {

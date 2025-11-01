@@ -16,9 +16,10 @@ window.ProductStore = (() => {
       { key: "zn", label: "Zn (%)" }
     ],
     "fertilizante_fosfatagem": [
-      { key: "p2o5_total", label: "P₂O₅ total (%)" },
-      { key: "p2o5_sol", label: "P₂O₅ solúvel (%)" },
-      { key: "cao", label: "CaO (%)" }
+      { key: "n_f", label: "N (%)" },
+      { key: "p2o5_f", label: "P₂O₅ (%)" },
+      { key: "k2o_f", label: "K₂O (%)" },
+      { key: "cao_f", label: "CaO (%)" }
     ],
     "corretivo": [
       { key: "cao", label: "CaO (%)" },
