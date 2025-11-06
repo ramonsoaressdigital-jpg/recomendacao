@@ -101,11 +101,11 @@ window.ProductStore = (() => {
             <option value="25">Múltiplos de 25</option>
             <option value="50">Múltiplos de 50</option>
             <option value="100">Múltiplos de 100</option>
-            <option value="100">Múltiplos de 250</option>
-            <option value="100">Múltiplos de 500</option>
-            <option value="100">Múltiplos de 1000</option>
-            <option value="100">Múltiplos de 2500</option>
-            <option value="100">Múltiplos de 5000</option>
+            <option value="250">Múltiplos de 250</option>
+            <option value="500">Múltiplos de 500</option>
+            <option value="1000">Múltiplos de 1000</option>
+            <option value="2500">Múltiplos de 2500</option>
+            <option value="5000">Múltiplos de 5000</option>
           </select>
         </div>
       </div>

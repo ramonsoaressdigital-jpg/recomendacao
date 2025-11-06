@@ -1,10 +1,19 @@
 // recommendation-engine.js
+
 import { DataStore } from "./data-store.js";
 
 // --- DEBUG SWITCH ---
+// Ativa logs detalhados no console durante a execução do motor de recomendação.
 const RECO_DEBUG = true;
 
 // ===== Utils de normalização/placeholder ===================================================
+/**
+ * Normaliza o texto de profundidade para o formato "AA-BB" (ex.: "00-20").
+ * - Aceita entradas como "0-20", "00 a 20", etc.
+ * - Se não casar com o padrão de dois números, retorna o texto original aparado.
+ * @param {any} s Valor textual da profundidade.
+ * @returns {string}
+ */
 function normDepth(s) {
   if (!s) return "";
   const m = String(s).match(/(\d+)\D+(\d+)/);
@@ -14,12 +23,20 @@ function normDepth(s) {
   return `${a}-${b}`;
 }
 
+/**
+ * Constrói um mapa de fontes **primárias** por atributo, considerando as garantias dos produtos.
+ * Regra: para cada produto, todos os atributos cujo valor de garantia é igual ao **máximo**
+ * do próprio produto são marcados como primários (empates são permitidos).
+ * Ex.: se um produto tem { N: 8, P2O5: 36, K2O: 6 }, o atributo primário será P2O5 (36).
+ * @param {Array<any>} produtos Lista de produtos do catálogo.
+ * @returns {Map<string, Set<string>>} Map<atributo(lowercase), Set<productIdString>>
+ */
 function buildPrimaryMap(produtos) {
   // retorna Map<atributo(lowercase), Set<productIdString>>
   const prim = new Map();
   for (const p of (produtos || [])) {
     const props = p?.props || {};
-    // pegue o(s) maior(es) valores de garantia do produto
+    // Determina o maior valor de garantia dentro deste produto
     let max = -Infinity;
     for (const v of Object.values(props)) {
       const n = parseFloat(v ?? "0");
@@ -27,7 +44,7 @@ function buildPrimaryMap(produtos) {
     }
     if (!(max > -Infinity)) continue;
 
-    // empate: todos com valor == max são primários
+    // Atributos com valor == max (e > 0) são marcados como primários
     for (const [k, v] of Object.entries(props)) {
       const n = parseFloat(v ?? "0");
       if (n === max && n > 0) {
@@ -41,6 +58,14 @@ function buildPrimaryMap(produtos) {
   return prim;
 }
 
+/**
+ * Substitui placeholders de variáveis (@nome@) e colunas do dataset (#Coluna#) na string
+ * de código/fórmula. Também normaliza vírgula decimal para ponto.
+ * @param {string} code Expressão/fórmula contendo placeholders.
+ * @param {Record<string, any>} vars Variáveis globais (ex.: metas) acessadas como @var@.
+ * @param {Record<string, any>} soil Dicionário da linha (solo) acessado como #Coluna#.
+ * @returns {string} Expressão pronta para avaliação numérica.
+ */
 function compilePlaceholders(code, vars, soil) {
   let out = String(code);
 
@@ -62,6 +87,12 @@ function compilePlaceholders(code, vars, soil) {
 }
 
 // ===== Execução de fórmulas (bloco if/else OU expressão simples) ===========================
+/**
+ * Converte um bloco de if/else (com returns) em uma expressão ternária equivalente.
+ * Útil para permitir que o mecanismo de avaliação trate condições como expressão única.
+ * @param {string} code Código contendo blocos if/else com "return".
+ * @returns {string} Expressão ternária equivalente (ou o original se não houver blocos).
+ */
 function toTernaryFromIfElse(code) {
   const src = String(code);
   const blockRe = /(if|else\s+if|else)\s*(?:\(([^)]*)\))?\s*\{\s*return\s*([^;{}]+?)\s*;?\s*\}/gi;
@@ -84,6 +115,15 @@ function toTernaryFromIfElse(code) {
   return out;
 }
 
+/**
+ * Prepara uma expressão para avaliação numérica, injetando variáveis/soil e
+ * convertendo vírgula decimal. Se detectar palavras-chave if/else, converte
+ * para forma ternária com `toTernaryFromIfElse`.
+ * @param {string} expr Expressão/fórmula do usuário.
+ * @param {Record<string, any>} vars Variáveis globais.
+ * @param {Record<string, any>} soil Valores da linha.
+ * @returns {string} Expressão pronta para `safeEval`.
+ */
 function compileExpression(expr, vars, soil) {
   let out = String(expr)
     .replace(/@([^@]+)@/g, (_, k) => vars[k.trim()] ?? 0)
@@ -96,6 +136,12 @@ function compileExpression(expr, vars, soil) {
   return out;
 }
 
+/**
+ * Avaliador numérico seguro: tenta compilar e executar a expressão como JavaScript
+ * em um escopo isolado. Retorna 0 em caso de erro ou resultado não-numérico finito.
+ * @param {string} expr Expressão numérica.
+ * @returns {number}
+ */
 function safeEval(expr) {
   try {
     const fn = new Function(`return (${expr});`);
@@ -106,7 +152,15 @@ function safeEval(expr) {
   }
 }
 
-// tenta FormulaEngine primeiro, depois fallback
+/**
+ * Avalia a necessidade (resultado da fórmula) preferindo um `FormulaEngine` externo,
+ * caso esteja disponível na página (window.FormulaEngine.evaluateSingle). Caso contrário,
+ * compila e avalia localmente via `compileExpression` + `safeEval`.
+ * @param {string} expression Fórmula original do usuário.
+ * @param {Record<string, any>} vars Variáveis globais.
+ * @param {Record<string, any>} soil Valores da linha.
+ * @returns {number} Valor numérico finito (ou 0 se falhar).
+ */
 function evaluateNeed(expression, vars, soil) {
   if (window.FormulaEngine?.evaluateSingle) {
     const v = window.FormulaEngine.evaluateSingle(expression, vars, soil);
@@ -117,13 +171,19 @@ function evaluateNeed(expression, vars, soil) {
 }
 
 // ===== Dataset helpers ====================================================================
+/** Localiza o índice da coluna de profundidade (heurística por substring "profundidade"). */
 function findDepthIndex(headers) {
   return headers.findIndex(h => h.toLowerCase().includes("profundidade"));
 }
+/** Localiza o índice do identificador do ponto (usa aliases comuns). */
 function findPointIndex(headers) {
   const aliases = ["ponto", "amostra", "id_ponto", "id"];
   return headers.findIndex(h => aliases.includes(h.toLowerCase()));
 }
+/**
+ * Converte uma linha do dataset em dicionário `soil`, preservando strings e
+ * tentando normalizar números (suporta vírgula decimal).
+ */
 function rowToSoilDict(headers, row) {
   const o = {};
   headers.forEach((h, i) => {
@@ -135,6 +195,11 @@ function rowToSoilDict(headers, row) {
 }
 
 // ===== Normalização de fórmulas ============================================================
+/**
+ * Uniformiza a estrutura de uma fórmula cadastrada, preservando campos originais
+ * em `_raw`, definindo `expression`, `targetPropKey`, `productIds`, `depths` e
+ * valores padrão de `priority`/`enabled`.
+ */
 function normalizeFormula(f) {
   const expression = f.expression ?? f.formula ?? "";
   const targetPropKey = (f.targetPropKey ?? f.atributo ?? "").toString().trim().toLowerCase();
@@ -162,51 +227,72 @@ function normalizeFormula(f) {
   };
 }
 
-// ===== Políticas de arredondamento e dose ==================================================
+// ===== Regras de arredondamento/dose =======================================================
+/**
+ * Arredonda um número `x` para o múltiplo de `step` conforme o modo:
+ * - "nearest": arredonda para o múltiplo mais próximo
+ * - "up": sempre para cima (ceil)
+ * - "down": sempre para baixo (floor)
+ * Caso `step` inválido ou não finito, retorna o valor original.
+ */
 function roundStep(x, step, mode = "nearest") {
   const n = Number(x), s = Number(step);
   if (!Number.isFinite(n) || !Number.isFinite(s) || s <= 0) return n;
-  if (mode === "up") return Math.ceil(n / s) * s;
+  if (mode === "up")   return Math.ceil(n / s)  * s;
   if (mode === "down") return Math.floor(n / s) * s;
-  return Math.round(n / s) * s;
+  return Math.round(n / s) * s; // nearest
 }
 
+/**
+ * Aplica as políticas de dose, respeitando sua ordem definida:
+ * 1) Pré-checagens SEM arredondar (limites e permiteZero)
+ * 2) Arredondamento apenas se o valor está dentro de [min, max]
+ * 3) Clamp final em [min, max]
+ *
+ * Regras específicas (conforme requisitos atuais):
+ * - Se `permiteZero`:
+ *    - raw <= 0  → retorna 0
+ *    - 0 < raw < min → retorna min
+ *    - raw > max → retorna max
+ *    - min ≤ raw ≤ max → arredonda e clampa
+ * - Se **não** `permiteZero`:
+ *    - raw <= 0 → retorna min (ou 0 se min=0)
+ *    - raw < min → retorna min
+ *    - raw > max → retorna max
+ *    - min ≤ raw ≤ max → arredonda e clampa
+ */
 function applyDoseRules(doseRaw, regras) {
-  let d = Math.max(0, Number(doseRaw) || 0);
-
-  if (regras?.arredonda) {
-    d = roundStep(d, regras.arredonda, regras?.arredondaModo || "nearest");
-  }
-
-  const min = Number(regras?.doseMin) || 0;
-  const max = Number(regras?.doseMax) || Infinity;
+  const raw = Number(doseRaw) || 0;
+  const step = Number(regras?.arredonda) || 0;
+  const mode = regras?.arredondaModo || "nearest";
+  const min  = Number(regras?.doseMin) || 0;
+  const max  = Number.isFinite(Number(regras?.doseMax)) ? Number(regras.doseMax) : Infinity;
   const permiteZero = regras?.permiteZero === true;
 
-  if (d === 0) {
-    d = permiteZero ? 0 : (min > 0 ? min : 0);
+  // --- pré-checagens sem arredondar ---
+  if (permiteZero) {
+    if (raw <= 0) return 0;             // mantém 0/negativo
+    if (raw < min) return min;          // joga direto pro mínimo
+    if (raw > max) return max;          // corta no máximo
   } else {
-    if (min > 0 && d < min) d = min;
+    if (raw <= 0) return (min > 0 ? min : 0);
+    if (raw < min) return min;
+    if (raw > max) return max;
   }
 
-  if (Number.isFinite(max)) d = Math.min(d, max);
-
-  if (regras?.arredonda) {
-    d = roundStep(d, regras.arredonda, regras?.arredondaModo || "nearest");
-  }
-
+  // --- dentro do intervalo [min, max]: arredonda e respeita limites ---
+  let d = step > 0 ? roundStep(raw, step, mode) : raw;
+  if (d < min) d = min;
+  if (Number.isFinite(max) && d > max) d = max;
   return d;
 }
 
-// ====== PRECEDÊNCIA DE ATRIBUTOS (espelha a trait) =========================================
-// Execute primeiro quem costuma “dirigir” formulações e que tem produtos multinutrientes.
-// const ATTRIBUTE_PRECEDENCE = [
-//   "p2o5", "p2o5_fosfatagem",
-//   "n", "n_fosfatagem",
-//   "k2o", "k2o_fosfatagem",
-//   "s", "cao", "mgo", "prnt",
-//   "b", "fe", "cu", "mn", "zn"
-// ];
-const TRAIT_PRIORITIES = {
+
+
+// ====== PRECEDÊNCIA DE ATRIBUTOS  =========================================
+// Tabela de prioridades para ordenar o processamento entre distintos atributos.
+// Menor número = maior prioridade.
+const PRIORITIES = {
   cao:1, mgo:2,
   p2o5:3, p2o5_fosfatagem:3,
   n:5,    n_fosfatagem:5,
@@ -215,19 +301,33 @@ const TRAIT_PRIORITIES = {
   b:8, cu:9, mn:10, fe:11, zn:12,
   prnt:99
 };
-// function attributeOrder(a, b) {
-//   const ia = ATTRIBUTE_PRECEDENCE.indexOf(String(a).toLowerCase());
-//   const ib = ATTRIBUTE_PRECEDENCE.indexOf(String(b).toLowerCase());
-//   const sa = ia < 0 ? 999 : ia;
-//   const sb = ib < 0 ? 999 : ib;
-//   return sa - sb;
-// }
+
+/** Compara nomes de atributos segundo a tabela de prioridade acima. */
 function attributeOrder(a, b) {
-  const pa = TRAIT_PRIORITIES[String(a).toLowerCase()] ?? 999;
-  const pb = TRAIT_PRIORITIES[String(b).toLowerCase()] ?? 999;
+  const pa = PRIORITIES[String(a).toLowerCase()] ?? 999;
+  const pb = PRIORITIES[String(b).toLowerCase()] ?? 999;
   return pa - pb;
 }
+
 // ====== MOTOR PRINCIPAL ====================================================================
+/**
+ * Executa o pipeline de recomendação sobre o `dataset` (headers + rows).
+ * Passos principais:
+ * 1) Carrega e normaliza as fórmulas habilitadas; agrupa por atributo e ordena por prioridade.
+ * 2) Carrega produtos e constrói mapa de fontes primárias por atributo.
+ * 3) Para cada linha (ponto/profundidade), avalia fórmulas
+ *    → calcula necessidade bruta do **atributo** (elemento)
+ *    → desconta o que já foi entregue por produtos anteriores
+ *    → escolhe produtos alvo (explícitos ou por presença de garantia)
+ *    → prioriza produtos que são fonte primária do atributo
+ *    → calcula doseRaw (nutriente→produto ou direto, conforme seu branch)
+ *    → aplica regras (mín/máx/arredondamento/zero)
+ *    → credita todos os atributos presentes no produto
+ *    → atualiza o restante do atributo alvo e registra a linha de saída.
+ * @param {{headers:string[], rows:any[][]}} dataset Conjunto tabular (laudo).
+ * @param {{includeZeros?: boolean}} opts Se true, registra linhas informativas com dose 0 quando não há restante.
+ * @returns {Record<string, Array<any>>} Mapa ponto -> linhas de recomendação.
+ */
 export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
   if (!dataset?.headers?.length || !dataset?.rows?.length) {
     throw new Error("Dataset inválido/ausente");
@@ -255,7 +355,7 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
 
   // 4) Prepara produtos e aux
   const produtos = window.ProductStore?.load?.() ?? [];
-  const primMap = buildPrimaryMap(produtos);   // <-- NOVO
+  const primMap = buildPrimaryMap(produtos);   // mapeia fontes primárias por atributo
 
   const produtosById = Object.fromEntries(produtos.map(p => [String(p.id), p]));
   const vars = DataStore.variaveis ?? {};
@@ -267,8 +367,6 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
   const out = {};
   // deliveredAll[ponto][atributo] = total ENTREGUE (em elemento) por qualquer produto
   const deliveredAll = {};
-
-
 
   dataset.rows.forEach((row, i) => {
     const soil = rowToSoilDict(dataset.headers, row);
@@ -306,7 +404,7 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
             .filter(p => p?.props && Number.isFinite(parseFloat(p.props[attrKey])))
             .map(p => p.id);
 
-        // ✅ Filtro de FONTE PRIMÁRIA (empate permitido) — usa o primMap que você já construiu
+        // ✅ Filtro de FONTE PRIMÁRIA (empate permitido) — usa o primMap
         const primSet = primMap.get(String(attrKey).toLowerCase()) ?? new Set();
         let ids = idsBrutos.filter(pid => primSet.has(String(pid)));
 
@@ -348,8 +446,23 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
 
           const regras = prod.regras ?? {};
 
+          // Você assume que a fórmula produz “necessidade de nutriente” 
+          // (ex.: kg/ha de K₂O) e converte para dose de produto dividindo pelo teor (%)
+          let doseRaw;
+
+          console.log(prod.tipo);
+          
           // Dose p/ cobrir o restante do atributo alvo:
-          const doseRaw = restante / (garantiaTarget / 100);
+          if (prod.tipo == "gesso" || prod.tipo == "corretivo"  ) {
+            // Para corretivos/gesso, trata a expressão como dose de PRODUTO (kg/ha)
+            doseRaw = necessidadeBruta
+            
+          } else {
+            // Para fertilizantes, converte necessidade de nutriente → dose de produto via garantia
+            doseRaw = restante / (garantiaTarget / 100);
+
+          }
+          // Aplica regras comuns (arredondamento, min, max, zero)
           let dose = applyDoseRules(doseRaw, regras);
 
           // Se dose foi zerada e não queremos zeros, pula
@@ -400,6 +513,14 @@ export function executarRecomendacao(dataset, opts = { includeZeros: true }) {
 
   return out;
 }
+
+/**
+ * Agrega o resultado por produto dentro de cada ponto, somando as doses finais.
+ * Retorna linhas com (ponto, produto, dose_total, unidade) ordenadas por ponto e nome.
+ * @param {Record<string, Array<any>>} resByPoint Saída do `executarRecomendacao`.
+ * @param {{decimals?:number}} param1 Arredondamento para exibição (padrão 0 casas).
+ * @returns {Array<{ponto:string, produto:string, dose_total:number, unidade:string}>}
+ */
 export function aggregatePorProduto(resByPoint, { decimals = 0 } = {}) {
   const totals = {};
   for (const [ponto, linhas] of Object.entries(resByPoint || {})) {
@@ -421,4 +542,3 @@ export function aggregatePorProduto(resByPoint, { decimals = 0 } = {}) {
   rows.sort((a, b) => (parseFloat(a.ponto) || 0) - (parseFloat(b.ponto) || 0) || a.produto.localeCompare(b.produto));
   return rows;
 }
-
